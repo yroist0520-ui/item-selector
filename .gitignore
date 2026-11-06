@@ -4,7 +4,8 @@ node_modules/
 .pnp.js
 
 # 构建产物
-dist/
+# dist/  部署需要，暂排除
+/dist/
 dist-ssr/
 *.local
 
