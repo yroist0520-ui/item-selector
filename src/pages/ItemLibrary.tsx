@@ -468,28 +468,24 @@ function ItemCard({
       <div className="px-2 pt-2 pb-1">
         <div className="text-[12px] md:text-xs text-neutral-800 truncate font-medium" title={item.name}>{item.name}</div>
       </div>
-      {/* 底部：操作按钮（黑色，明确可点） */}
+      {/* 底部：操作按钮（极简图标，黑色底） */}
       <div className="px-2 pb-2 grid grid-cols-4 gap-1">
-        <button
-          onClick={onReplace}
-          className="h-8 md:h-7 rounded-md bg-neutral-900 text-white text-[11px] md:text-xs font-medium hover:bg-neutral-700 flex items-center justify-center gap-0.5"
-          aria-label="替换图片"
-        ><RefreshCw size={11} /> 替换</button>
-        <button
-          onClick={onMove}
-          className="h-8 md:h-7 rounded-md bg-neutral-900 text-white text-[11px] md:text-xs font-medium hover:bg-neutral-700 flex items-center justify-center gap-0.5"
-          aria-label="移动到分类"
-        ><Move size={11} /> 移动</button>
-        <button
-          onClick={onEdit}
-          className="h-8 md:h-7 rounded-md bg-neutral-900 text-white text-[11px] md:text-xs font-medium hover:bg-neutral-700 flex items-center justify-center gap-0.5"
-          aria-label="编辑名称"
-        ><Edit2 size={11} /> 命名</button>
-        <button
-          onClick={onDelete}
-          className="h-8 md:h-7 rounded-md bg-red-600 text-white text-[11px] md:text-xs font-medium hover:bg-red-700 flex items-center justify-center gap-0.5"
-          aria-label="删除"
-        ><Trash2 size={11} /> 删除</button>
+        <button onClick={onReplace} aria-label="替换图片" title="替换图片"
+          className="h-8 md:h-7 rounded-md bg-neutral-900 text-white hover:bg-neutral-700 flex items-center justify-center">
+          <RefreshCw size={13} />
+        </button>
+        <button onClick={onMove} aria-label="移动到分类" title="移动到分类"
+          className="h-8 md:h-7 rounded-md bg-neutral-900 text-white hover:bg-neutral-700 flex items-center justify-center">
+          <Move size={13} />
+        </button>
+        <button onClick={onEdit} aria-label="编辑名称" title="编辑名称"
+          className="h-8 md:h-7 rounded-md bg-neutral-900 text-white hover:bg-neutral-700 flex items-center justify-center">
+          <Edit2 size={13} />
+        </button>
+        <button onClick={onDelete} aria-label="删除" title="删除"
+          className="h-8 md:h-7 rounded-md bg-red-600 text-white hover:bg-red-700 flex items-center justify-center">
+          <Trash2 size={13} />
+        </button>
       </div>
     </div>
   )
