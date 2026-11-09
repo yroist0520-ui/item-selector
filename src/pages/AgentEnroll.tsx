@@ -2,23 +2,30 @@ import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   UserPlus, Users, Search, Trash2, Check, CheckCircle,
-  ChevronLeft, ChevronRight, FileText, Pencil, X, ImageOff,
+  ChevronLeft, ChevronRight, FileText, Pencil, X, ImageOff, Sparkles,
 } from 'lucide-react'
 import { db, genId, addPerson, deletePerson, selectItem, unselectItem, renamePerson, type Item } from '@/db'
 import { toast } from '@/utils/toast'
 import { Modal } from '@/components/Modal'
 
-type Mode = 'single' | 'batch' | 'pick' | 'manage'
+type Mode = 'single' | 'batch' | 'manage'
 
-/** 批量粘贴文本 → 清洗 [图片] 占位符 → 按行拆分 */
+/** 批量粘贴文本 → 按行拆分 → 每行清洗垃圾 → 过滤 */
 export function cleanBatchNames(raw: string): string[] {
   if (!raw) return []
   return raw
-    .replace(/\[图片\]/g, ' ')          // [图片] 先替换成空格，避免合并错
-    .replace(/\s+/g, ' ')                // 合并多余空格
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter(Boolean)
+    .split(/\r?\n/)                       // 先按行拆！
+    .map((line) => line
+      .replace(/<img[^>]*>.*?<\/img>/gi, ' ')  // <img>...</img> 垃圾
+      .replace(/<[^>]+>/g, ' ')                // 其他 HTML 标签
+      .replace(/\[图片\]/g, ' ')               // [图片] 占位符
+      .replace(/https?:\/\/\S+/g, ' ')         // URL
+      .replace(/^[a-f0-9]{16,}$/i, '')        // 纯 hex hash（img 里残留）
+      .replace(/[<>]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim(),
+    )
+    .filter((s) => s && s.length >= 1)
 }
 
 export function AgentEnroll() {
@@ -34,6 +41,10 @@ export function AgentEnroll() {
   const [batchRaw, setBatchRaw] = useState('')
   const [batchPreview, setBatchPreview] = useState<string[]>([])
   const [batchStep, setBatchStep] = useState<'input' | 'preview'>('input')
+
+  // —— 批量同时选单状态 ——
+  const [batchPickIds, setBatchPickIds] = useState<string[]>([])
+  const [batchPickPendingPersons, setBatchPickPendingPersons] = useState<string[]>([])
 
   const [searchP, setSearchP] = useState('')
   const [renameTarget, setRenameTarget] = useState<{ id: string; name: string } | null>(null)
@@ -86,6 +97,8 @@ export function AgentEnroll() {
     await db.persons.bulkAdd(unique.map((n) => ({ id: genId(), name: n, createdAt: Date.now() })))
     toast.success(`已批量创建 ${unique.length} 人${dupWarn ? ` · ${dupWarn} 个重复被去除` : ''}`)
     setBatchRaw(''); setBatchPreview([]); setBatchStep('input')
+    // 自动准备批量选单
+    setBatchPickPendingPersons(unique)
   }
 
   async function confirmDeletePerson() {
@@ -95,7 +108,7 @@ export function AgentEnroll() {
     toast.success(count > 0 ? '已删除该人员及其选择关系' : '已删除该人员')
   }
 
-  // —— 选单界面 ——
+  // —— 单人选单界面 ——
   if (pickingPersonId) {
     const p = persons.find((x) => x.id === pickingPersonId)
     const picked = selMap.get(pickingPersonId) ?? new Set()
@@ -104,8 +117,46 @@ export function AgentEnroll() {
         items={items}
         picked={picked}
         personName={p?.name ?? ''}
-        onBack={() => { setPickingPersonId(null); setMode('single') }}
+        onBack={() => { setPickingPersonId(null) }}
         onToggle={toggleItemForPick}
+      />
+    )
+  }
+
+  // —— 批量同时选单界面 ——
+  if (batchPickIds.length > 0) {
+    const pickedCounts = new Map<string, number>()
+    for (const item of items) {
+      let c = 0
+      for (const pid of batchPickIds) {
+        if (selMap.get(pid)?.has(item.id)) c++
+      }
+      pickedCounts.set(item.id, c)
+    }
+    const anyPickedCount = items.reduce((acc, it) => acc + (pickedCounts.get(it.id)! > 0 ? 1 : 0), 0)
+
+    return (
+      <BatchPickGrid
+        items={items}
+        persons={persons.filter((p) => batchPickIds.includes(p.id))}
+        selMap={selMap}
+        pickedCounts={pickedCounts}
+        anyPickedCount={anyPickedCount}
+        onBack={() => setBatchPickIds([])}
+        onToggleForAll={async (itemId) => {
+          // 给所有人 toggle 同一张图
+          const allPicked = batchPickIds.every((pid) => selMap.get(pid)?.has(itemId))
+          if (allPicked) {
+            for (const pid of batchPickIds) await unselectItem(pid, itemId)
+          } else {
+            for (const pid of batchPickIds) await selectItem(pid, itemId)
+          }
+        }}
+        onTogglePerson={(pid) => {
+          setBatchPickIds((prev) =>
+            prev.includes(pid) ? prev.filter((x) => x !== pid) : [...prev, pid],
+          )
+        }}
       />
     )
   }
@@ -120,7 +171,7 @@ export function AgentEnroll() {
             共 {persons.length} 人 · 选单图片 {items.length} 张
           </p>
         </div>
-        {/* Tab 切换：手机上全宽分段控件 */}
+        {/* Tab 切换 */}
         <div className="flex rounded-lg md:rounded-md border border-neutral-200 overflow-hidden text-[13px] md:text-sm bg-white">
           <button
             onClick={() => setMode('single')}
@@ -170,7 +221,20 @@ export function AgentEnroll() {
             )}
             {persons.length > 0 && (
               <div>
-                <div className="text-xs text-neutral-500 mb-2">已录入（点击直接进入选单）</div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs text-neutral-500">已录入（点击进入选单）</div>
+                  {persons.length >= 2 && (
+                    <button
+                      onClick={() => {
+                        const ids = persons.map((p) => p.id)
+                        setBatchPickIds(ids)
+                      }}
+                      className="text-xs text-neutral-900 font-medium hover:text-neutral-700 flex items-center gap-1 px-2.5 py-1 rounded-full bg-neutral-100 hover:bg-neutral-200 transition"
+                    >
+                      <Sparkles size={12} /> 批量选单（所有人一起）
+                    </button>
+                  )}
+                </div>
                 <div className="flex flex-wrap gap-2">
                   {persons.slice(0, 20).map((p) => {
                     const c = selMap.get(p.id)?.size ?? 0
@@ -200,12 +264,14 @@ export function AgentEnroll() {
                   粘贴人员姓名，每行一个
                 </div>
                 <div className="text-xs text-neutral-500 mb-3">
-                  会自动清理聊天记录中的 <code className="bg-neutral-100 rounded px-1">[图片]</code> 占位符
+                  自动清理 <code className="bg-neutral-100 rounded px-1">[图片]</code>、
+                  <code className="bg-neutral-100 rounded px-1">{'<img>...</img>'}</code>、
+                  URL 等聊天记录垃圾
                 </div>
                 <textarea
                   value={batchRaw}
                   onChange={(e) => setBatchRaw(e.target.value)}
-                  placeholder={`马雨晴\n鑫念[图片]\n张三\n李四[图片]\n王五`}
+                  placeholder={`马雨晴\n鑫念[图片]\n张三\n李四\n王五`}
                   className="w-full h-56 md:h-48 p-3 rounded-lg md:rounded-md border border-neutral-200 text-sm outline-none focus:border-neutral-400 font-mono"
                 />
                 <div className="mt-3 flex flex-col md:flex-row justify-end gap-2">
@@ -349,11 +415,50 @@ export function AgentEnroll() {
           仅删除该人员与其图片之间的选择关系，不会删除代选单库中的图片。
         </p>
       </Modal>
+
+      {/* 批量导入后问是否进入批量选单 */}
+      <Modal
+        open={batchPickPendingPersons.length > 0}
+        onClose={() => setBatchPickPendingPersons([])}
+        title={`已创建 ${batchPickPendingPersons.length} 人`}
+        footer={
+          <>
+            <button
+              onClick={() => setBatchPickPendingPersons([])}
+              className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md text-sm hover:bg-neutral-100"
+            >完成</button>
+            <button
+              onClick={async () => {
+                const names = batchPickPendingPersons
+                const allNew = await db.persons.where('name').anyOf(names).toArray()
+                setBatchPickIds(allNew.map((p) => p.id))
+                setBatchPickPendingPersons([])
+              }}
+              className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md bg-neutral-900 text-white text-sm hover:bg-neutral-800 flex items-center gap-1"
+            >
+              <Sparkles size={14} /> 批量选单（同时给所有人选图）
+            </button>
+          </>
+        }
+      >
+        <p className="text-sm text-neutral-700 mb-3">
+          是否要让这 {batchPickPendingPersons.length} 人一起选单？
+          批量选单模式下，点击一张图片就是给<strong>所有人同时加上这张</strong>。
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {batchPickPendingPersons.slice(0, 20).map((n) => (
+            <span key={n} className="text-xs rounded-full border border-neutral-200 px-2.5 py-0.5">{n}</span>
+          ))}
+          {batchPickPendingPersons.length > 20 && (
+            <span className="text-xs text-neutral-400 self-center">+{batchPickPendingPersons.length - 20}</span>
+          )}
+        </div>
+      </Modal>
     </div>
   )
 }
 
-/** 选单网格 */
+/** 单人选单网格 */
 function PickGrid({
   items, picked, personName, onBack, onToggle,
 }: {
@@ -422,6 +527,128 @@ function PickGrid({
                     <ImgView blob={it.blob} />
                   </div>
                   <div className="px-2 py-1.5 text-[12px] md:text-xs truncate" title={it.name}>{it.name}</div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 批量同时选单网格 */
+function BatchPickGrid({
+  items, persons, selMap, pickedCounts, anyPickedCount, onBack, onToggleForAll, onTogglePerson,
+}: {
+  items: Item[]
+  persons: { id: string; name: string }[]
+  selMap: Map<string, Set<string>>
+  pickedCounts: Map<string, number>
+  anyPickedCount: number
+  onBack: () => void
+  onToggleForAll: (itemId: string) => void
+  onTogglePerson: (pid: string) => void
+}) {
+  const [search, setSearch] = useState('')
+  const filtered = items.filter((i) => !search.trim() || i.name.toLowerCase().includes(search.trim().toLowerCase()))
+  const totalPicks = persons.reduce((acc, p) => acc + (selMap.get(p.id)?.size ?? 0), 0)
+
+  return (
+    <div className="p-4 md:p-8 h-full flex flex-col gap-3 md:gap-5">
+      {/* 顶部 */}
+      <div className="space-y-3 md:space-y-0 md:flex md:flex-wrap md:items-center md:gap-3">
+        <button onClick={onBack} className="h-11 md:h-9 px-4 md:px-3 rounded-lg md:rounded-md border border-neutral-200 text-sm hover:bg-neutral-50 flex items-center gap-1">
+          <ChevronLeft size={15} /> 返回
+        </button>
+        <div className="md:flex-1 md:min-w-0">
+          <div className="text-base md:text-lg font-semibold text-neutral-900 flex items-center gap-2">
+            <Sparkles size={18} className="text-amber-500" />
+            批量选单 · 点击一张图 = 给所有人同时选上
+          </div>
+          <div className="text-xs md:text-sm text-neutral-500 mt-0.5">
+            {persons.length} 人 · 已选 {anyPickedCount} 张图 · 共 {totalPicks} 条选择关系
+          </div>
+        </div>
+        <div className="relative md:w-56">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜索图片"
+            className="w-full h-11 md:h-9 pl-9 pr-3 rounded-lg md:rounded-md border border-neutral-200 text-sm outline-none focus:border-neutral-400 bg-white"
+          />
+        </div>
+      </div>
+
+      {/* 参与人员选择条（横向滚动） */}
+      <div className="rounded-xl bg-white border border-neutral-200 p-3">
+        <div className="text-xs text-neutral-500 mb-2 flex items-center gap-1">
+          <Users size={12} /> 参与选单的人员（点击可移除）
+        </div>
+        <div className="flex gap-2 overflow-x-auto thin-scroll pb-1">
+          {persons.map((p) => {
+            const picked = selMap.get(p.id)?.size ?? 0
+            return (
+              <button
+                key={p.id}
+                onClick={() => onTogglePerson(p.id)}
+                className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-full bg-neutral-900 text-white px-3 py-1.5 text-sm"
+              >
+                <span>{p.name}</span>
+                <span className="text-neutral-400 text-xs">·{picked}</span>
+                <X size={12} className="opacity-70" />
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* 网格 */}
+      {items.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-neutral-200 flex-1 flex flex-col items-center justify-center text-center text-sm text-neutral-400">
+          <FileText size={26} className="mb-2 text-neutral-300" />
+          代选单库暂无图片
+        </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto thin-scroll rounded-xl bg-white border border-neutral-200 p-3 md:p-4">
+          <div className="grid gap-2 md:gap-3 grid-cols-3 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {filtered.map((it) => {
+              const count = pickedCounts.get(it.id) ?? 0
+              const allPicked = count === persons.length && persons.length > 0
+              const somePicked = count > 0 && !allPicked
+              return (
+                <button
+                  key={it.id}
+                  onClick={() => onToggleForAll(it.id)}
+                  className={`relative text-left rounded-lg border-2 overflow-hidden transition
+                    ${allPicked
+                      ? 'border-neutral-900 ring-2 ring-neutral-900/10'
+                      : somePicked
+                      ? 'border-amber-500 ring-2 ring-amber-500/20'
+                      : 'border-neutral-200 hover:border-neutral-400'}`}
+                >
+                  <div className="aspect-square bg-neutral-50 relative">
+                    {/* 所有人都选了 */}
+                    {allPicked && (
+                      <div className="absolute top-1.5 left-1.5 md:top-2 md:left-2 bg-neutral-900 text-white rounded-full p-1 z-10">
+                        <CheckCircle size={16} />
+                      </div>
+                    )}
+                    {/* 部分人选了 */}
+                    {somePicked && (
+                      <div className="absolute top-1.5 left-1.5 md:top-2 md:left-2 bg-amber-500 text-white text-[11px] font-medium rounded-full px-1.5 py-0.5 z-10">
+                        {count}/{persons.length}
+                      </div>
+                    )}
+                    <ImgView blob={it.blob} />
+                  </div>
+                  <div className="px-2 py-1.5 text-[12px] md:text-xs truncate flex items-center justify-between" title={it.name}>
+                    <span className="truncate">{it.name}</span>
+                    {count > 0 && !allPicked && (
+                      <span className="text-amber-600 ml-1 font-medium flex-shrink-0">{count}</span>
+                    )}
+                  </div>
                 </button>
               )
             })}
