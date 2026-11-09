@@ -119,6 +119,17 @@ export function AgentEnroll() {
         personName={p?.name ?? ''}
         onBack={() => { setPickingPersonId(null) }}
         onToggle={toggleItemForPick}
+        onConfirmDone={() => {
+          const c = picked.size
+          setPickingPersonId(null)
+          toast.success(`已完成 ${p?.name ?? ''} 选单 · 共 ${c} 张`)
+        }}
+        onCancelClear={async () => {
+          if (!pickingPersonId) return
+          const count = await db.selections.where('personId').equals(pickingPersonId).delete()
+          setPickingPersonId(null)
+          toast.success(`已清空 ${p?.name ?? ''} 的 ${count} 张选择`)
+        }}
       />
     )
   }
@@ -142,9 +153,9 @@ export function AgentEnroll() {
         selMap={selMap}
         pickedCounts={pickedCounts}
         anyPickedCount={anyPickedCount}
+        totalPicks={batchPickIds.reduce((acc, pid) => acc + (selMap.get(pid)?.size ?? 0), 0)}
         onBack={() => setBatchPickIds([])}
         onToggleForAll={async (itemId) => {
-          // 给所有人 toggle 同一张图
           const allPicked = batchPickIds.every((pid) => selMap.get(pid)?.has(itemId))
           if (allPicked) {
             for (const pid of batchPickIds) await unselectItem(pid, itemId)
@@ -156,6 +167,16 @@ export function AgentEnroll() {
           setBatchPickIds((prev) =>
             prev.includes(pid) ? prev.filter((x) => x !== pid) : [...prev, pid],
           )
+        }}
+        onConfirmDone={(names, total) => {
+          setBatchPickIds([])
+          toast.success(`已完成 ${names.length} 人批量选单 · 共 ${total} 条选择关系`)
+        }}
+        onCancelClear={async (names) => {
+          if (batchPickIds.length === 0) return
+          const count = await db.selections.where('personId').anyOf(batchPickIds).delete()
+          setBatchPickIds([])
+          toast.success(`已清空 ${names.length} 人共 ${count} 条选择关系`)
         }}
       />
     )
@@ -460,23 +481,26 @@ export function AgentEnroll() {
 
 /** 单人选单网格 */
 function PickGrid({
-  items, picked, personName, onBack, onToggle,
+  items, picked, personName, onBack, onToggle, onConfirmDone, onCancelClear,
 }: {
   items: Item[]
   picked: Set<string>
   personName: string
   onBack: () => void
   onToggle: (itemId: string) => void
+  onConfirmDone: () => void
+  onCancelClear: () => void
 }) {
   const [search, setSearch] = useState('')
+  const [showCancel, setShowCancel] = useState(false)
   const filtered = items.filter((i) => !search.trim() || i.name.toLowerCase().includes(search.trim().toLowerCase()))
   const pickedCount = picked.size
 
   return (
-    <div className="p-4 md:p-8 h-full flex flex-col gap-3 md:gap-5">
+    <div className="p-4 md:p-8 h-full flex flex-col gap-3 md:gap-5 relative">
       {/* 顶部 */}
       <div className="space-y-3 md:space-y-0 md:flex md:flex-wrap md:items-center md:gap-3">
-        <button onClick={onBack} className="h-11 md:h-9 px-4 md:px-3 rounded-lg md:rounded-md border border-neutral-200 text-sm hover:bg-neutral-50 flex items-center gap-1">
+        <button onClick={onBack} className="h-11 md:h-9 px-4 md:px-3 rounded-lg md:rounded-md border border-neutral-200 text-sm hover:bg-neutral-50 flex items-center gap-1 flex-shrink-0">
           <ChevronLeft size={15} /> 返回
         </button>
         <div className="md:flex-1 md:min-w-0">
@@ -505,7 +529,7 @@ function PickGrid({
           代选单库暂无图片
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto thin-scroll rounded-xl bg-white border border-neutral-200 p-3 md:p-4">
+        <div className="flex-1 overflow-y-auto thin-scroll rounded-xl bg-white border border-neutral-200 p-3 md:p-4 pb-24 md:pb-4">
           <div className="grid gap-2 md:gap-3 grid-cols-3 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {filtered.map((it) => {
               const isPicked = picked.has(it.id)
@@ -513,7 +537,7 @@ function PickGrid({
                 <button
                   key={it.id}
                   onClick={() => onToggle(it.id)}
-                  className={`relative text-left rounded-lg border-2 overflow-hidden transition
+                  className={`relative text-left rounded-lg border-2 overflow-hidden transition active:scale-[0.97]
                     ${isPicked
                       ? 'border-neutral-900 ring-2 ring-neutral-900/10'
                       : 'border-neutral-200 hover:border-neutral-400'}`}
@@ -533,32 +557,78 @@ function PickGrid({
           </div>
         </div>
       )}
+
+      {/* 底部固定操作栏 */}
+      <div className="fixed bottom-0 left-0 right-0 z-20 p-3 md:p-0 md:static md:flex-shrink-0">
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-white/95 backdrop-blur border-t border-neutral-200 md:border md:rounded-xl shadow-lg md:shadow-none flex gap-2 md:gap-3 p-3">
+            <button
+              onClick={() => setShowCancel(true)}
+              className="flex-1 md:flex-none md:px-6 h-12 md:h-11 rounded-lg md:rounded-md border border-neutral-200 text-sm font-medium hover:bg-neutral-50 text-neutral-700 active:bg-neutral-100 flex items-center justify-center gap-1"
+            >
+              <X size={15} /> 取消（清空）
+            </button>
+            <button
+              disabled={pickedCount === 0}
+              onClick={onConfirmDone}
+              className={`flex-[1.5] md:flex-none md:px-8 h-12 md:h-11 rounded-lg md:rounded-md text-sm font-medium flex items-center justify-center gap-1 transition
+                ${pickedCount > 0
+                  ? 'bg-neutral-900 text-white hover:bg-neutral-800 active:bg-neutral-700'
+                  : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'}`}
+            >
+              <CheckCircle size={15} />
+              确认完成 {pickedCount > 0 && `· ${pickedCount} 张`}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 取消清空确认 */}
+      <Modal open={showCancel} onClose={() => setShowCancel(false)} title="取消本次选单？"
+        footer={
+          <>
+            <button onClick={() => setShowCancel(false)} className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md text-sm hover:bg-neutral-100">再看看</button>
+            <button
+              onClick={() => { setShowCancel(false); onCancelClear() }}
+              className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md bg-red-600 text-white text-sm hover:bg-red-700"
+            >确认清空 {pickedCount} 张</button>
+          </>
+        }>
+        <p className="text-sm text-neutral-700">
+          会清掉 <strong>{personName}</strong> 已经选中的 <strong>{pickedCount}</strong> 张图片，<br/>
+          <span className="text-neutral-500">已选中的图片需要重新选。</span>
+        </p>
+      </Modal>
     </div>
   )
 }
 
 /** 批量同时选单网格 */
 function BatchPickGrid({
-  items, persons, selMap, pickedCounts, anyPickedCount, onBack, onToggleForAll, onTogglePerson,
+  items, persons, selMap, pickedCounts, anyPickedCount, totalPicks,
+  onBack, onToggleForAll, onTogglePerson, onConfirmDone, onCancelClear,
 }: {
   items: Item[]
   persons: { id: string; name: string }[]
   selMap: Map<string, Set<string>>
   pickedCounts: Map<string, number>
   anyPickedCount: number
+  totalPicks: number
   onBack: () => void
   onToggleForAll: (itemId: string) => void
   onTogglePerson: (pid: string) => void
+  onConfirmDone: (names: string[], total: number) => void
+  onCancelClear: (names: string[]) => void
 }) {
   const [search, setSearch] = useState('')
+  const [showCancel, setShowCancel] = useState(false)
   const filtered = items.filter((i) => !search.trim() || i.name.toLowerCase().includes(search.trim().toLowerCase()))
-  const totalPicks = persons.reduce((acc, p) => acc + (selMap.get(p.id)?.size ?? 0), 0)
 
   return (
-    <div className="p-4 md:p-8 h-full flex flex-col gap-3 md:gap-5">
+    <div className="p-4 md:p-8 h-full flex flex-col gap-3 md:gap-5 relative">
       {/* 顶部 */}
       <div className="space-y-3 md:space-y-0 md:flex md:flex-wrap md:items-center md:gap-3">
-        <button onClick={onBack} className="h-11 md:h-9 px-4 md:px-3 rounded-lg md:rounded-md border border-neutral-200 text-sm hover:bg-neutral-50 flex items-center gap-1">
+        <button onClick={onBack} className="h-11 md:h-9 px-4 md:px-3 rounded-lg md:rounded-md border border-neutral-200 text-sm hover:bg-neutral-50 flex items-center gap-1 flex-shrink-0">
           <ChevronLeft size={15} /> 返回
         </button>
         <div className="md:flex-1 md:min-w-0">
@@ -611,7 +681,7 @@ function BatchPickGrid({
           代选单库暂无图片
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto thin-scroll rounded-xl bg-white border border-neutral-200 p-3 md:p-4">
+        <div className="flex-1 overflow-y-auto thin-scroll rounded-xl bg-white border border-neutral-200 p-3 md:p-4 pb-24 md:pb-4">
           <div className="grid gap-2 md:gap-3 grid-cols-3 sm:grid-cols-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {filtered.map((it) => {
               const count = pickedCounts.get(it.id) ?? 0
@@ -621,7 +691,7 @@ function BatchPickGrid({
                 <button
                   key={it.id}
                   onClick={() => onToggleForAll(it.id)}
-                  className={`relative text-left rounded-lg border-2 overflow-hidden transition
+                  className={`relative text-left rounded-lg border-2 overflow-hidden transition active:scale-[0.97]
                     ${allPicked
                       ? 'border-neutral-900 ring-2 ring-neutral-900/10'
                       : somePicked
@@ -629,13 +699,11 @@ function BatchPickGrid({
                       : 'border-neutral-200 hover:border-neutral-400'}`}
                 >
                   <div className="aspect-square bg-neutral-50 relative">
-                    {/* 所有人都选了 */}
                     {allPicked && (
                       <div className="absolute top-1.5 left-1.5 md:top-2 md:left-2 bg-neutral-900 text-white rounded-full p-1 z-10">
                         <CheckCircle size={16} />
                       </div>
                     )}
-                    {/* 部分人选了 */}
                     {somePicked && (
                       <div className="absolute top-1.5 left-1.5 md:top-2 md:left-2 bg-amber-500 text-white text-[11px] font-medium rounded-full px-1.5 py-0.5 z-10">
                         {count}/{persons.length}
@@ -655,6 +723,60 @@ function BatchPickGrid({
           </div>
         </div>
       )}
+
+      {/* 底部固定操作栏 */}
+      <div className="fixed bottom-0 left-0 right-0 z-20 p-3 md:p-0 md:static md:flex-shrink-0">
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-white/95 backdrop-blur border-t border-neutral-200 md:border md:rounded-xl shadow-lg md:shadow-none flex gap-2 md:gap-3 p-3">
+            <button
+              onClick={() => setShowCancel(true)}
+              className="flex-1 md:flex-none md:px-6 h-12 md:h-11 rounded-lg md:rounded-md border border-neutral-200 text-sm font-medium hover:bg-neutral-50 text-neutral-700 active:bg-neutral-100 flex items-center justify-center gap-1"
+            >
+              <X size={15} /> 取消（清空）
+            </button>
+            <button
+              disabled={totalPicks === 0}
+              onClick={() => onConfirmDone(persons.map((p) => p.name), totalPicks)}
+              className={`flex-[1.5] md:flex-none md:px-8 h-12 md:h-11 rounded-lg md:rounded-md text-sm font-medium flex items-center justify-center gap-1 transition
+                ${totalPicks > 0
+                  ? 'bg-neutral-900 text-white hover:bg-neutral-800 active:bg-neutral-700'
+                  : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'}`}
+            >
+              <CheckCircle size={15} />
+              确认完成 {totalPicks > 0 && `· ${totalPicks} 条`}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 取消清空确认 */}
+      <Modal open={showCancel} onClose={() => setShowCancel(false)} title="取消批量选单？"
+        footer={
+          <>
+            <button onClick={() => setShowCancel(false)} className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md text-sm hover:bg-neutral-100">再看看</button>
+            <button
+              onClick={() => {
+                setShowCancel(false)
+                onCancelClear(persons.map((p) => p.name))
+              }}
+              className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md bg-red-600 text-white text-sm hover:bg-red-700"
+            >确认清空 {totalPicks} 条</button>
+          </>
+        }>
+        <p className="text-sm text-neutral-700">
+          会清掉 <strong>{persons.length}</strong> 人共 <strong>{totalPicks}</strong> 条选择关系：
+        </p>
+        <div className="mt-2 flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+          {persons.map((p) => {
+            const c = selMap.get(p.id)?.size ?? 0
+            return (
+              <span key={p.id} className="text-xs rounded-full border border-neutral-200 px-2 py-0.5">
+                {p.name} · {c} 张
+              </span>
+            )
+          })}
+        </div>
+      </Modal>
     </div>
   )
 }
