@@ -21,14 +21,36 @@ export function ItemLibrary() {
   )
 
   async function addFiles(files: FileList | File[]) {
-    const list = Array.from(files).filter((f) => f.type.startsWith('image/'))
-    if (list.length === 0) return
-    const results = await Promise.allSettled(
-      list.map((f) => addItem(f.name.replace(/\.[^.]+$/, '') || '未命名', f)),
+    // 支持 iOS 微信常见格式：jpeg/png/webp/heic/heif/gif/bmp
+    const ALLOWED = new Set(['jpeg', 'jpg', 'png', 'webp', 'heic', 'heif', 'gif', 'bmp'])
+    const list = Array.from(files).filter((f) => {
+      const type = f.type.replace('image/', '').toLowerCase()
+      // 有些文件没有 type（如 iOS 某些保存的图片），靠扩展名兜底
+      const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
+      return f.type.startsWith('image/') || ALLOWED.has(type) || ALLOWED.has(ext)
+    })
+    if (list.length === 0) {
+      toast.error('没有可上传的图片（支持 JPG/PNG/WEBP/HEIC/GIF/BMP）')
+      return
+    }
+    const settled = await Promise.allSettled(
+      list.map(async (f) => {
+        try {
+          await addItem(f.name.replace(/\.[^.]+$/, '') || '未命名', f)
+          return { ok: true as const }
+        } catch (e) {
+          return { ok: false as const, err: e instanceof Error ? e.message : String(e), name: f.name }
+        }
+      }),
     )
-    const ok = results.filter((r) => r.status === 'fulfilled').length
-    const fail = results.length - ok
-    toast.success(`已添加 ${ok} 张图片${fail ? ` · ${fail} 张失败` : ''}`)
+    const results = settled.map((r) => (r.status === 'fulfilled' ? r.value : { ok: false as const, err: 'unknown', name: '' }))
+    const ok = results.filter((r) => r.ok).length
+    const fails = results.filter((r): r is Extract<typeof results[number], { ok: false }> => !r.ok)
+    if (fails.length === 0) {
+      toast.success(`已添加 ${ok} 张图片`)
+    } else {
+      toast.error(`添加 ${ok} 张成功，${fails.length} 张失败：${fails[0].name || 'unknown'}（${fails[0].err.slice(0, 60)}）`)
+    }
   }
 
   async function confirmRename() {
@@ -88,7 +110,7 @@ export function ItemLibrary() {
         <input
           ref={globalInputRef}
           type="file"
-          accept="image/jpeg,image/jpg,image/png,image/webp"
+          accept="image/*"
           multiple
           className="hidden"
           onChange={(e) => addFiles(e.target.files ?? [])}
@@ -172,7 +194,7 @@ export function ItemLibrary() {
         }>
         <input
           type="file"
-          accept="image/jpeg,image/jpg,image/png,image/webp"
+          accept="image/*"
           onChange={(e) => setReplaceFile(e.target.files?.[0] ?? null)}
           className="text-sm"
         />
