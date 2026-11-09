@@ -14,22 +14,12 @@ if (typeof globalThis.crypto !== 'undefined' && !(globalThis.crypto as any).rand
     })
 }
 
-// 动态 basename 检测
-// GitHub Pages 子路径部署：https://<user>.github.io/<repo>/items → basename="/<repo>"
-// 本地 dev / 根域名部署：https://localhost:5173/items → basename="/"
-function detectBasename(): string {
-  const path = window.location.pathname
-  const segments = path.split('/').filter(Boolean)
-  // 已知的路由段（App.tsx 里定义的）
-  const KNOWN = new Set(['items', 'agents', 'summary', 'backup', 'assets'])
-  if (segments.length > 0 && !KNOWN.has(segments[0])) {
-    return '/' + segments[0]
-  }
-  return '/'
-}
-
-const basename = detectBasename()
-console.info('[Router] basename:', basename, 'pathname:', window.location.pathname)
+// 硬编码 basename：生产环境部署到 GitHub Pages 子路径 /item-selector/
+// 本地 dev server 和其他部署（根路径）用 "/"
+const basename: string = import.meta.env.DEV
+  ? '/'
+  : '/item-selector'
+console.info('[Router] basename:', basename, 'dev:', import.meta.env.DEV, 'path:', window.location.pathname)
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
