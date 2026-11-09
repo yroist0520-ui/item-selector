@@ -132,42 +132,42 @@ export function BackupPage() {
   }
 
   return (
-    <div className="p-5 md:p-8 h-full flex flex-col">
-      <div className="mb-5">
-        <h1 className="text-xl md:text-2xl font-semibold">数据备份</h1>
-        <p className="text-sm text-neutral-500 mt-1">
+    <div className="p-4 md:p-8 h-full flex flex-col gap-3 md:gap-5">
+      <div className="space-y-3 md:space-y-0">
+        <h1 className="text-lg md:text-2xl font-semibold">数据备份</h1>
+        <p className="text-xs md:text-sm text-neutral-500">
           本地 IndexedDB 存储 · 当前 {items} 张图 · {persons} 人 · {selections} 条选择关系
         </p>
       </div>
 
-      <div className="max-w-3xl space-y-4">
-        <div className="rounded-xl bg-white border border-neutral-200 p-5">
-          <div className="font-medium mb-1">导出完整备份</div>
+      <div className="max-w-3xl space-y-3 md:space-y-4">
+        <div className="rounded-xl bg-white border border-neutral-200 p-4 md:p-5">
+          <div className="font-medium mb-1 text-sm md:text-base">导出完整备份</div>
           <div className="text-xs text-neutral-500 mb-3">
             打包 ZIP，包含所有图片原图、人员数据和选择关系。可用于跨浏览器/跨设备迁移。
           </div>
           <button
             onClick={exportZip}
             disabled={busy || items === 0}
-            className="h-9 px-4 rounded-md bg-neutral-900 text-white text-sm hover:bg-neutral-800 flex items-center gap-1.5 disabled:opacity-40"
+            className="w-full md:w-auto h-11 md:h-9 px-5 md:px-4 rounded-lg md:rounded-md bg-neutral-900 text-white text-sm hover:bg-neutral-800 flex items-center justify-center gap-1.5 disabled:opacity-40"
           >
-            {busy && <Loader2 size={14} className="animate-spin" />}
-            <Download size={14} /> 导出 ZIP 备份
+            {busy && <Loader2 size={15} className="animate-spin" />}
+            <Download size={15} /> 导出 ZIP 备份
           </button>
         </div>
 
-        <div className="rounded-xl bg-white border border-neutral-200 p-5">
-          <div className="font-medium mb-1">从备份恢复</div>
+        <div className="rounded-xl bg-white border border-neutral-200 p-4 md:p-5">
+          <div className="font-medium mb-1 text-sm md:text-base">从备份恢复</div>
           <div className="text-xs text-neutral-500 mb-3">
             选择之前导出的 ZIP 文件。系统中已有的数据不会自动删除，冲突时让你选择处理方式。
           </div>
           <button
             onClick={() => fileRef.current?.click()}
             disabled={busy}
-            className="h-9 px-4 rounded-md border border-neutral-200 text-sm hover:bg-neutral-50 flex items-center gap-1.5 disabled:opacity-40"
+            className="w-full md:w-auto h-11 md:h-9 px-5 md:px-4 rounded-lg md:rounded-md border border-neutral-200 text-sm hover:bg-neutral-50 flex items-center justify-center gap-1.5 disabled:opacity-40"
           >
-            {busy && <Loader2 size={14} className="animate-spin" />}
-            <Upload size={14} /> 选择 ZIP 文件导入
+            {busy && <Loader2 size={15} className="animate-spin" />}
+            <Upload size={15} /> 选择 ZIP 文件导入
           </button>
           <input ref={fileRef} type="file" accept=".zip" className="hidden" onChange={onPickFile} />
         </div>
@@ -181,13 +181,13 @@ export function BackupPage() {
         footer={
           <>
             <button onClick={() => { setConfirmOpen(null); setPendingFile(null) }}
-              className="px-3 py-1.5 rounded-md text-sm hover:bg-neutral-100">取消</button>
+              className="flex-1 md:flex-none px-4 py-2.5 md:px-3 md:py-1.5 rounded-md text-sm hover:bg-neutral-100">取消</button>
             <button onClick={() => doImport('skip')}
-              className="px-3 py-1.5 rounded-md border border-neutral-200 text-sm hover:bg-neutral-50">跳过已存在的</button>
+              className="flex-1 md:flex-none px-4 py-2.5 md:px-3 md:py-1.5 rounded-md border border-neutral-200 text-sm hover:bg-neutral-50">跳过已存在</button>
             <button onClick={() => doImport('overwrite')}
-              className="px-3 py-1.5 rounded-md bg-amber-500 text-white text-sm hover:bg-amber-600">覆盖同名</button>
+              className="flex-1 md:flex-none px-4 py-2.5 md:px-3 md:py-1.5 rounded-md bg-amber-500 text-white text-sm hover:bg-amber-600">覆盖同名</button>
             <button onClick={() => doImport('keep')}
-              className="px-3 py-1.5 rounded-md bg-neutral-900 text-white text-sm hover:bg-neutral-800">全部保留（冲突的重命名）</button>
+              className="flex-1 md:flex-none px-4 py-2.5 md:px-3 md:py-1.5 rounded-md bg-neutral-900 text-white text-sm hover:bg-neutral-800">全部保留</button>
           </>
         }
       >

@@ -45,3 +45,4 @@ coverage/
 # 本地数据备份
 *.zip
 !*.example.zip
+deploy-package/

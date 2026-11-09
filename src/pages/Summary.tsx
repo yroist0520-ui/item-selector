@@ -182,68 +182,78 @@ export function Summary() {
   }
 
   return (
-    <div className="p-5 md:p-8 h-full flex flex-col">
-      <div className="mb-5 flex flex-wrap items-center gap-3">
-        <div className="flex-1 min-w-0">
-          <h1 className="text-xl md:text-2xl font-semibold">图片订单汇总</h1>
-          <p className="text-sm text-neutral-500 mt-1">
+    <div className="p-4 md:p-8 h-full flex flex-col gap-3 md:gap-5">
+      {/* —— 顶部标题 + 操作栏 —— */}
+      <div className="space-y-3 md:space-y-0 md:flex md:flex-wrap md:items-center md:gap-3">
+        <div className="md:flex-1 md:min-w-0">
+          <h1 className="text-lg md:text-2xl font-semibold">图片订单汇总</h1>
+          <p className="text-xs md:text-sm text-neutral-500 mt-0.5 md:mt-1">
             以图片为中心自动汇总选择名单 · 共 {summaries.length} 张图片
           </p>
         </div>
+
         {/* 撤销条 */}
         {undoSnapshot && (
-          <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-3 py-1.5 flex items-center gap-2">
-            <Undo2 size={14} />
-            <span>30 秒内可撤销上次清空</span>
+          <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-3 py-2 flex items-center gap-2">
+            <Undo2 size={15} />
+            <span className="flex-1">30 秒内可撤销上次清空</span>
             <button
               onClick={doUndo}
-              className="ml-1 px-2 py-0.5 rounded bg-amber-600 text-white text-xs font-medium hover:bg-amber-700"
+              className="ml-auto h-9 px-3 rounded-md bg-amber-600 text-white text-sm font-medium hover:bg-amber-700"
             >撤销</button>
           </div>
         )}
-        <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="按图片名称搜索"
-            className="h-9 pl-8 pr-3 rounded-md border border-neutral-200 text-sm outline-none focus:border-neutral-400 w-56"
-          />
-        </div>
-        <select
-          value={sort}
-          onChange={(e) => setSort(e.target.value as SortMode)}
-          className="h-9 px-3 rounded-md border border-neutral-200 text-sm bg-white outline-none"
-        >
-          <option value="default">默认顺序</option>
-          <option value="count-desc">按选择人数 · 多 → 少</option>
-          <option value="count-asc">按选择人数 · 少 → 多</option>
-        </select>
-        <div className="rounded-md border border-neutral-200 text-sm flex items-center gap-2 px-3 py-1.5">
-          <label className="flex items-center gap-1.5 cursor-pointer">
+
+        {/* 搜索 + 排序 + 批量导出：手机换行堆叠 */}
+        <div className="flex flex-col md:flex-row gap-2 md:gap-3 md:w-auto">
+          <div className="relative">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
             <input
-              type="checkbox"
-              checked={clearAfterExport}
-              onChange={(e) => setClearAfterExport(e.target.checked)}
-              className="accent-neutral-900"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="按图片名称搜索"
+              className="w-full md:w-56 h-11 md:h-9 pl-9 pr-3 rounded-lg md:rounded-md border border-neutral-200 text-sm outline-none focus:border-neutral-400 bg-white"
             />
-            导出成功后清空本次名单
-          </label>
+          </div>
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortMode)}
+            className="w-full md:w-auto h-11 md:h-9 px-3 rounded-lg md:rounded-md border border-neutral-200 text-sm bg-white outline-none"
+          >
+            <option value="default">默认顺序</option>
+            <option value="count-desc">按选择人数 · 多 → 少</option>
+            <option value="count-asc">按选择人数 · 少 → 多</option>
+          </select>
         </div>
-        <button
-          onClick={handleAllPDF}
-          disabled={!!busy || filtered.length === 0}
-          className="h-9 px-3 rounded-md border border-neutral-200 text-sm hover:bg-neutral-50 flex items-center gap-1.5 disabled:opacity-40"
-        >
-          <FileText size={14} /> 全部 PDF
-        </button>
-        <button
-          onClick={handleBulkPNG}
-          disabled={!!busy || filtered.length === 0}
-          className="h-9 px-3 rounded-md bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 flex items-center gap-1.5 disabled:opacity-40"
-        >
-          <Archive size={14} /> 批量下载 PNG
-        </button>
+
+        {/* 批量导出 + 清空选项 */}
+        <div className="flex flex-col md:flex-row gap-2 md:gap-3 md:items-center">
+          <div className="rounded-lg md:rounded-md border border-neutral-200 text-sm flex items-center gap-2 px-3 py-2 md:py-1.5 bg-white">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={clearAfterExport}
+                onChange={(e) => setClearAfterExport(e.target.checked)}
+                className="accent-neutral-900 w-4 h-4"
+              />
+              <span className="text-sm">导出后清空名单</span>
+            </label>
+          </div>
+          <button
+            onClick={handleAllPDF}
+            disabled={!!busy || filtered.length === 0}
+            className="h-11 md:h-9 px-4 md:px-3 rounded-lg md:rounded-md border border-neutral-200 text-sm hover:bg-neutral-50 flex items-center justify-center gap-1.5 disabled:opacity-40"
+          >
+            <FileText size={15} /> 全部 PDF
+          </button>
+          <button
+            onClick={handleBulkPNG}
+            disabled={!!busy || filtered.length === 0}
+            className="h-11 md:h-9 px-4 md:px-3 rounded-lg md:rounded-md bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 flex items-center justify-center gap-1.5 disabled:opacity-40"
+          >
+            <Archive size={15} /> 批量下载 PNG
+          </button>
+        </div>
       </div>
 
       {/* 导出进度 */}
@@ -262,13 +272,13 @@ export function Summary() {
       )}
 
       {/* 汇总卡 */}
-      <div className="flex-1 overflow-y-auto thin-scroll rounded-xl bg-white border border-neutral-200 p-4">
+      <div className="flex-1 overflow-y-auto thin-scroll rounded-xl bg-white border border-neutral-200 p-3 md:p-4">
         {filtered.length === 0 ? (
           <div className="py-16 text-center text-sm text-neutral-400">
             {summaries.length === 0 ? '代选单库暂无图片' : '没有匹配的图片'}
           </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid gap-3 md:gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {filtered.map((s) => (
               <SummaryCard
                 key={s.itemId}
@@ -372,27 +382,27 @@ function SummaryCard({
           </button>
         )}
 
-        {/* 操作 */}
-        <div className="mt-3 flex flex-wrap gap-1.5">
+        {/* 操作：手机上一行一个，触摸友好 */}
+        <div className="mt-3 grid grid-cols-2 md:flex md:flex-wrap gap-2">
           <button onClick={onCopy}
             disabled={summary.names.length === 0}
-            className="px-2 py-1 rounded border border-neutral-200 text-[11px] text-neutral-700 hover:bg-neutral-50 flex items-center gap-1 disabled:opacity-40">
-            <Copy size={11} />复制名单
+            className="h-10 md:h-8 px-3 md:px-2 py-1.5 rounded-md border border-neutral-200 text-sm md:text-[11px] text-neutral-700 hover:bg-neutral-50 flex items-center justify-center gap-1 disabled:opacity-40">
+            <Copy size={14} className="md:w-[11px] md:h-[11px]" />复制名单
           </button>
           <button onClick={onPng}
             disabled={!!busy}
-            className="px-2 py-1 rounded border border-neutral-200 text-[11px] text-neutral-700 hover:bg-neutral-50 flex items-center gap-1 disabled:opacity-40">
-            <Download size={11} />PNG
+            className="h-10 md:h-8 px-3 md:px-2 py-1.5 rounded-md border border-neutral-200 text-sm md:text-[11px] text-neutral-700 hover:bg-neutral-50 flex items-center justify-center gap-1 disabled:opacity-40">
+            <Download size={14} className="md:w-[11px] md:h-[11px]" />PNG
           </button>
           <button onClick={onPdf}
             disabled={!!busy}
-            className="px-2 py-1 rounded border border-neutral-200 text-[11px] text-neutral-700 hover:bg-neutral-50 flex items-center gap-1 disabled:opacity-40">
-            <FileText size={11} />PDF
+            className="h-10 md:h-8 px-3 md:px-2 py-1.5 rounded-md border border-neutral-200 text-sm md:text-[11px] text-neutral-700 hover:bg-neutral-50 flex items-center justify-center gap-1 disabled:opacity-40">
+            <FileText size={14} className="md:w-[11px] md:h-[11px]" />PDF
           </button>
           <button onClick={onClear}
             disabled={summary.names.length === 0 || !!busy}
-            className="px-2 py-1 rounded border border-red-200 text-[11px] text-red-500 hover:bg-red-50 flex items-center gap-1 disabled:opacity-40 ml-auto">
-            <Trash2 size={11} />清空名单
+            className="h-10 md:h-8 px-3 md:px-2 py-1.5 rounded-md border border-red-200 text-sm md:text-[11px] text-red-500 hover:bg-red-50 flex items-center justify-center gap-1 disabled:opacity-40">
+            <Trash2 size={14} className="md:w-[11px] md:h-[11px]" />清空名单
           </button>
         </div>
       </div>
