@@ -419,18 +419,10 @@ export function AgentEnroll() {
           </>
         }
       >
-        <p className="text-sm text-neutral-700 mb-3">
-          是否要让这 {batchPickPendingPersons.length} 人一起选单？
+        <p className="text-sm text-neutral-700">
+          人员已创建完成，在「<strong>人员管理</strong>」里可以搜索到他们。<br />
           批量选单模式下，点击一张图片就是给<strong>所有人同时加上这张</strong>。
         </p>
-        <div className="flex flex-wrap gap-1.5">
-          {batchPickPendingPersons.slice(0, 20).map((n) => (
-            <span key={n} className="text-xs rounded-full border border-neutral-200 px-2.5 py-0.5">{n}</span>
-          ))}
-          {batchPickPendingPersons.length > 20 && (
-            <span className="text-xs text-neutral-400 self-center">+{batchPickPendingPersons.length - 20}</span>
-          )}
-        </div>
       </Modal>
     </div>
   )

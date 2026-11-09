@@ -110,6 +110,8 @@ export function Summary() {
   const [undoSnapshot, setUndoSnapshot] = useState<Selection[] | null>(null)
   const [undoTimer, setUndoTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
   const [confirmClearItemIds, setConfirmClearItemIds] = useState<string[] | null>(null)
+  const [onlyWithSelections, setOnlyWithSelections] = useState(true) // 默认只显示有名单的图
+  const [showExportMenu, setShowExportMenu] = useState(false) // 批量导出下拉
 
   // —— 根据时间范围过滤 selections ——
   const timeRange = useMemo(
@@ -132,6 +134,7 @@ export function Summary() {
 
   const filtered = useMemo(() => {
     let arr = summaries
+    if (onlyWithSelections) arr = arr.filter((s) => s.names.length > 0)
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       arr = arr.filter((s) => s.name.toLowerCase().includes(q))
@@ -139,7 +142,7 @@ export function Summary() {
     if (sort === 'count-desc') arr = [...arr].sort((a, b) => b.names.length - a.names.length)
     else if (sort === 'count-asc') arr = [...arr].sort((a, b) => a.names.length - b.names.length)
     return arr
-  }, [summaries, search, sort])
+  }, [summaries, search, sort, onlyWithSelections])
 
   // 显示在顶部的统计
   const totalSelectionsInRange = filteredSelections.length
@@ -366,31 +369,58 @@ export function Summary() {
         </select>
 
         <div className="md:ml-auto flex flex-col md:flex-row gap-2 md:gap-3 md:items-center">
-          <div className="rounded-lg md:rounded-md border border-neutral-200 text-sm flex items-center gap-2 px-3 py-2 md:py-1.5 bg-white">
-            <label className="flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={clearAfterExport}
-                onChange={(e) => setClearAfterExport(e.target.checked)}
-                className="accent-neutral-900 w-4 h-4"
-              />
-              <span className="text-sm">导出后清空名单</span>
-            </label>
+          {/* 只显示有名单的图 */}
+          <label className="flex items-center gap-1.5 cursor-pointer text-sm text-neutral-700">
+            <input
+              type="checkbox"
+              checked={onlyWithSelections}
+              onChange={(e) => setOnlyWithSelections(e.target.checked)}
+              className="accent-neutral-900 w-4 h-4"
+            />
+            <span>只显示有名单</span>
+          </label>
+          <label className="flex items-center gap-1.5 cursor-pointer text-sm text-neutral-700">
+            <input
+              type="checkbox"
+              checked={clearAfterExport}
+              onChange={(e) => setClearAfterExport(e.target.checked)}
+              className="accent-neutral-900 w-4 h-4"
+            />
+            <span>导出后清空</span>
+          </label>
+
+          {/* 批量导出：下拉菜单选 ZIP 或 PDF */}
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu((v) => !v)}
+              disabled={!!busy || filtered.length === 0}
+              className="h-11 md:h-9 px-4 md:px-3 rounded-lg md:rounded-md bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 flex items-center justify-center gap-1 disabled:opacity-40"
+            >
+              <Download size={15} /> 批量导出
+              <ChevronDown size={14} className={`transition ${showExportMenu ? 'rotate-180' : ''}`} />
+            </button>
+            {showExportMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowExportMenu(false)} />
+                <div className="absolute right-0 mt-1 w-44 rounded-lg border border-neutral-200 bg-white shadow-lg z-20 overflow-hidden">
+                  <button
+                    onClick={() => { setShowExportMenu(false); handleAllPDF() }}
+                    disabled={!!busy || filtered.length === 0}
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-neutral-50 flex items-center gap-2 disabled:opacity-40"
+                  >
+                    <FileText size={14} className="text-neutral-500" /> 全部 PDF（一份长文档）
+                  </button>
+                  <button
+                    onClick={() => { setShowExportMenu(false); handleBulkPNG() }}
+                    disabled={!!busy || filtered.length === 0}
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-neutral-50 flex items-center gap-2 disabled:opacity-40"
+                  >
+                    <Archive size={14} className="text-neutral-500" /> ZIP 压缩包（每张 PNG）
+                  </button>
+                </div>
+              </>
+            )}
           </div>
-          <button
-            onClick={handleAllPDF}
-            disabled={!!busy || filtered.length === 0}
-            className="h-11 md:h-9 px-4 md:px-3 rounded-lg md:rounded-md border border-neutral-200 text-sm hover:bg-neutral-50 flex items-center justify-center gap-1.5 disabled:opacity-40"
-          >
-            <FileText size={15} /> 全部 PDF
-          </button>
-          <button
-            onClick={handleBulkPNG}
-            disabled={!!busy || filtered.length === 0}
-            className="h-11 md:h-9 px-4 md:px-3 rounded-lg md:rounded-md bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 flex items-center justify-center gap-1.5 disabled:opacity-40"
-          >
-            <Archive size={15} /> 批量下载 PNG
-          </button>
         </div>
       </div>
 
@@ -418,7 +448,7 @@ export function Summary() {
               : `在「${timeRange.label}」范围内没有选择记录`}
           </div>
         ) : (
-          <div className="grid gap-3 md:gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid gap-2 md:gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {filtered.map((s) => (
               <SummaryCard
                 key={s.itemId}

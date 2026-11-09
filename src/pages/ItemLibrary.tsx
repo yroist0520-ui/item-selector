@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Image as ImageIcon, Upload, Edit2, Trash2, Search, ImageOff,
-  Plus, Tag, FolderOpen,
+  Plus, Tag, FolderOpen, Move,
 } from 'lucide-react'
 import { db, addItem, updateItem, deleteItem, setItemCategory, addCategory, deleteCategory, renameCategory, type Item, type Category } from '@/db'
 import { toast } from '@/utils/toast'
@@ -411,36 +411,36 @@ function ItemCard({
   }, [item.categoryId])
 
   return (
-    <div className="group rounded-lg border border-neutral-200 overflow-hidden hover:border-neutral-300 bg-white">
+    <div className="rounded-lg border border-neutral-200 overflow-hidden hover:border-neutral-300 bg-white">
       <div className="aspect-square bg-neutral-50 relative">
         <ImageFromBlob blob={item.blob} />
-        {/* 替换按钮：手机上始终可见，桌面 hover 显示 */}
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/50 to-transparent p-1.5 md:p-2 flex gap-1 justify-end opacity-100 md:opacity-0 md:group-hover:opacity-100 transition">
-          <button
-            onClick={onMove}
-            className="px-2 py-1 md:px-1.5 md:py-0.5 rounded bg-white/85 hover:bg-white text-neutral-700 text-xs md:text-[11px] font-medium"
-            title="移动到分类"
-          >移动</button>
-        </div>
         {catName && (
           <div className="absolute top-1.5 left-1.5 md:top-2 md:left-2 bg-black/60 text-white text-[10px] md:text-[11px] px-1.5 py-0.5 rounded">
             {catName}
           </div>
         )}
       </div>
-      {/* 底部：名称 + 操作 */}
-      <div className="p-1.5 md:p-2 flex items-center gap-0.5 md:gap-1">
+      {/* 底部：名称 + 操作图标 */}
+      <div className="p-1.5 md:p-2 flex items-center gap-0.5">
         <div className="flex-1 min-w-0 text-[12px] md:text-xs text-neutral-800 truncate" title={item.name}>{item.name}</div>
         <button
+          onClick={onMove}
+          className="p-1 rounded hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600"
+          aria-label="移动到分类"
+          title="移动到分类"
+        ><Move size={12} /></button>
+        <button
           onClick={onEdit}
-          className="p-1.5 md:p-1 rounded hover:bg-neutral-100 text-neutral-500"
+          className="p-1 rounded hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600"
           aria-label="编辑名称"
-        ><Edit2 size={14} /></button>
+          title="编辑名称"
+        ><Edit2 size={12} /></button>
         <button
           onClick={onDelete}
-          className="p-1.5 md:p-1 rounded hover:bg-red-50 text-red-500"
+          className="p-1 rounded hover:bg-red-50 text-neutral-400 hover:text-red-500"
           aria-label="删除"
-        ><Trash2 size={14} /></button>
+          title="删除"
+        ><Trash2 size={12} /></button>
       </div>
     </div>
   )
