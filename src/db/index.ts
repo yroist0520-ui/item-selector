@@ -1,9 +1,17 @@
 import Dexie, { type EntityTable } from 'dexie'
 
+export interface Category {
+  id: string
+  name: string
+  order: number
+  createdAt: number
+}
+
 export interface Item {
   id: string
   name: string
   blob: Blob
+  categoryId?: string | null
   createdAt: number
   updatedAt: number
 }
@@ -21,10 +29,17 @@ export interface Selection {
   createdAt: number
 }
 
+const DEFAULT_CATEGORIES = [
+  { name: '手机壁纸', order: 1 },
+  { name: 'iPad壁纸', order: 2 },
+  { name: '方图', order: 3 },
+]
+
 class AppDB extends Dexie {
   items!: EntityTable<Item, 'id'>
   persons!: EntityTable<Person, 'id'>
   selections!: EntityTable<Selection, 'id'>
+  categories!: EntityTable<Category, 'id'>
 
   constructor() {
     super('item-selector-db')
@@ -33,6 +48,29 @@ class AppDB extends Dexie {
       persons: 'id, name, createdAt',
       selections: 'id, personId, itemId, [personId+itemId]',
     })
+    // v2: add categories table + Item.categoryId field
+    this.version(2)
+      .stores({
+        items: 'id, name, categoryId, createdAt',
+        persons: 'id, name, createdAt',
+        selections: 'id, personId, itemId, [personId+itemId]',
+        categories: 'id, name, order',
+      })
+      .upgrade(async (tx) => {
+        // Seed default categories if none exist
+        const count = await tx.table('categories').count()
+        if (count === 0) {
+          const now = Date.now()
+          for (const c of DEFAULT_CATEGORIES) {
+            await tx.table('categories').add({
+              id: genId(),
+              name: c.name,
+              order: c.order,
+              createdAt: now + c.order,
+            })
+          }
+        }
+      })
   }
 }
 
@@ -42,15 +80,45 @@ export function genId(): string {
   return crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36)
 }
 
-export async function addItem(name: string, blob: Blob): Promise<Item> {
+/* ========== Category CRUD ========== */
+
+export async function addCategory(name: string): Promise<Category> {
   const now = Date.now()
   const id = genId()
-  await db.items.add({ id, name, blob, createdAt: now, updatedAt: now })
-  return { id, name, blob, createdAt: now, updatedAt: now }
+  const order = (await db.categories.count()) + 1
+  await db.categories.add({ id, name, order, createdAt: now })
+  return { id, name, order, createdAt: now }
 }
 
-export async function updateItem(id: string, patch: Partial<Pick<Item, 'name' | 'blob'>>): Promise<void> {
+export async function renameCategory(id: string, name: string): Promise<void> {
+  await db.categories.update(id, { name })
+}
+
+/** 删除分类，里面的图片 categoryId 置为 null（未分类） */
+export async function deleteCategory(id: string): Promise<number> {
+  let moved = 0
+  await db.transaction('rw', [db.items, db.categories], async () => {
+    moved = await db.items.where('categoryId').equals(id).modify({ categoryId: null })
+    await db.categories.delete(id)
+  })
+  return moved
+}
+
+/* ========== Item CRUD ========== */
+
+export async function addItem(name: string, blob: Blob, categoryId: string | null = null): Promise<Item> {
+  const now = Date.now()
+  const id = genId()
+  await db.items.add({ id, name, blob, categoryId, createdAt: now, updatedAt: now })
+  return { id, name, blob, categoryId, createdAt: now, updatedAt: now }
+}
+
+export async function updateItem(id: string, patch: Partial<Pick<Item, 'name' | 'blob' | 'categoryId'>>): Promise<void> {
   await db.items.update(id, { ...patch, updatedAt: Date.now() })
+}
+
+export async function setItemCategory(itemId: string, categoryId: string | null): Promise<void> {
+  await db.items.update(itemId, { categoryId, updatedAt: Date.now() })
 }
 
 /** 删除图片，同时清理该图片所有选择关系 */
@@ -62,6 +130,8 @@ export async function deleteItem(id: string): Promise<number> {
   })
   return selCount
 }
+
+/* ========== Person CRUD ========== */
 
 export async function addPerson(name: string): Promise<Person> {
   const now = Date.now()
@@ -83,6 +153,8 @@ export async function deletePerson(id: string): Promise<number> {
   })
   return selCount
 }
+
+/* ========== Selection CRUD ========== */
 
 /** 确保存在 personId↔itemId 选择关系；返回是否新增 */
 export async function selectItem(personId: string, itemId: string): Promise<boolean> {
@@ -127,12 +199,12 @@ export async function restoreSelections(rows: Selection[]): Promise<void> {
   await db.selections.bulkAdd(dedup)
 }
 
-// 暴露到 globalThis 方便 browser_evaluate 直接写数据（测试用）
-if (typeof globalThis !== 'undefined') (globalThis as any).__db = db
-if (typeof globalThis !== 'undefined') (globalThis as any).__genId = genId
-
 /** 读取某人员已选图片 id 列表 */
 export async function getSelectedItemIdsOf(personId: string): Promise<string[]> {
   const rows = await db.selections.where('personId').equals(personId).toArray()
   return rows.map((r) => r.itemId)
 }
+
+// 暴露到 globalThis 方便测试
+if (typeof globalThis !== 'undefined') (globalThis as any).__db = db
+if (typeof globalThis !== 'undefined') (globalThis as any).__genId = genId

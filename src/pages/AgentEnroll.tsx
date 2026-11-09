@@ -1,26 +1,23 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
-  UserPlus, Users, Search, Trash2, Check, CheckCircle,
-  ChevronLeft, ChevronRight, FileText, Pencil, X, ImageOff, Sparkles,
+  Users, Search, Trash2, Check, CheckCircle,
+  ChevronLeft, Pencil, X, ImageOff, Sparkles, FileText, Plus,
 } from 'lucide-react'
 import { db, genId, addPerson, deletePerson, selectItem, unselectItem, renamePerson, type Item } from '@/db'
 import { toast } from '@/utils/toast'
 import { Modal } from '@/components/Modal'
 
-type Mode = 'single' | 'batch' | 'manage'
-
-/** 批量粘贴文本 → 按行拆分 → 每行清洗垃圾 → 过滤 */
 export function cleanBatchNames(raw: string): string[] {
   if (!raw) return []
   return raw
-    .split(/\r?\n/)                       // 先按行拆！
+    .split(/\r?\n/)
     .map((line) => line
-      .replace(/<img[^>]*>.*?<\/img>/gi, ' ')  // <img>...</img> 垃圾
-      .replace(/<[^>]+>/g, ' ')                // 其他 HTML 标签
-      .replace(/\[图片\]/g, ' ')               // [图片] 占位符
-      .replace(/https?:\/\/\S+/g, ' ')         // URL
-      .replace(/^[a-f0-9]{16,}$/i, '')        // 纯 hex hash（img 里残留）
+      .replace(/<img[^>]*>.*?<\/img>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\[图片\]/g, ' ')
+      .replace(/https?:\/\/\S+/g, ' ')
+      .replace(/^[a-f0-9]{16,}$/i, '')
       .replace(/[<>]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim(),
@@ -32,20 +29,20 @@ export function AgentEnroll() {
   const items = useLiveQuery(() => db.items.orderBy('createdAt').reverse().toArray()) ?? []
   const persons = useLiveQuery(() => db.persons.orderBy('createdAt').reverse().toArray()) ?? []
   const selections = useLiveQuery(() => db.selections.toArray()) ?? []
+  const categories = useLiveQuery(() => db.categories.orderBy('order').toArray()) ?? []
 
-  const [mode, setMode] = useState<Mode>('single')
-
-  const [singleName, setSingleName] = useState('')
+  // 正在给某人选单
   const [pickingPersonId, setPickingPersonId] = useState<string | null>(null)
+  const [batchPickIds, setBatchPickIds] = useState<string[]>([])
 
+  // 批量导入状态
+  const [showBatch, setShowBatch] = useState(false)
   const [batchRaw, setBatchRaw] = useState('')
   const [batchPreview, setBatchPreview] = useState<string[]>([])
   const [batchStep, setBatchStep] = useState<'input' | 'preview'>('input')
-
-  // —— 批量同时选单状态 ——
-  const [batchPickIds, setBatchPickIds] = useState<string[]>([])
   const [batchPickPendingPersons, setBatchPickPendingPersons] = useState<string[]>([])
 
+  // 搜索 / 改名 / 删除
   const [searchP, setSearchP] = useState('')
   const [renameTarget, setRenameTarget] = useState<{ id: string; name: string } | null>(null)
   const [confirmDelPerson, setConfirmDelPerson] = useState<string | null>(null)
@@ -63,15 +60,6 @@ export function AgentEnroll() {
     }
     return m
   }, [selections])
-
-  async function handlePickStart() {
-    const n = singleName.trim()
-    if (!n) { toast.error('请输入姓名'); return }
-    let p = persons.find((x) => x.name === n)
-    if (!p) p = await addPerson(n)
-    setPickingPersonId(p.id)
-    setSingleName('')
-  }
 
   async function toggleItemForPick(itemId: string) {
     if (!pickingPersonId) return
@@ -96,8 +84,7 @@ export function AgentEnroll() {
     }
     await db.persons.bulkAdd(unique.map((n) => ({ id: genId(), name: n, createdAt: Date.now() })))
     toast.success(`已批量创建 ${unique.length} 人${dupWarn ? ` · ${dupWarn} 个重复被去除` : ''}`)
-    setBatchRaw(''); setBatchPreview([]); setBatchStep('input')
-    // 自动准备批量选单
+    setBatchRaw(''); setBatchPreview([]); setBatchStep('input'); setShowBatch(false)
     setBatchPickPendingPersons(unique)
   }
 
@@ -115,9 +102,10 @@ export function AgentEnroll() {
     return (
       <PickGrid
         items={items}
+        categories={categories}
         picked={picked}
         personName={p?.name ?? ''}
-        onBack={() => { setPickingPersonId(null) }}
+        onBack={() => setPickingPersonId(null)}
         onToggle={toggleItemForPick}
         onConfirmDone={() => {
           const c = picked.size
@@ -149,6 +137,7 @@ export function AgentEnroll() {
     return (
       <BatchPickGrid
         items={items}
+        categories={categories}
         persons={persons.filter((p) => batchPickIds.includes(p.id))}
         selMap={selMap}
         pickedCounts={pickedCounts}
@@ -172,229 +161,119 @@ export function AgentEnroll() {
           setBatchPickIds([])
           toast.success(`已完成 ${names.length} 人批量选单 · 共 ${total} 条选择关系`)
         }}
-        onCancelClear={async (names) => {
+        onCancelClear={async () => {
           if (batchPickIds.length === 0) return
           const count = await db.selections.where('personId').anyOf(batchPickIds).delete()
           setBatchPickIds([])
-          toast.success(`已清空 ${names.length} 人共 ${count} 条选择关系`)
+          toast.success(`已清空 ${batchPickIds.length} 人共 ${count} 条选择关系`)
         }}
       />
     )
   }
 
+  // —— 主视图：人员列表 + 搜索 ——
   return (
     <div className="p-4 md:p-8 h-full flex flex-col gap-3 md:gap-5">
-      {/* —— 顶部标题 + Tab —— */}
+      {/* —— 顶部标题 + 操作 —— */}
       <div className="space-y-3 md:space-y-0 md:flex md:flex-wrap md:items-center md:gap-3">
         <div className="md:flex-1 md:min-w-0">
-          <h1 className="text-lg md:text-2xl font-semibold">代理录入</h1>
+          <h1 className="text-lg md:text-2xl font-semibold">人员管理</h1>
           <p className="text-xs md:text-sm text-neutral-500 mt-0.5 md:mt-1">
             共 {persons.length} 人 · 选单图片 {items.length} 张
           </p>
         </div>
-        {/* Tab 切换 */}
-        <div className="flex rounded-lg md:rounded-md border border-neutral-200 overflow-hidden text-[13px] md:text-sm bg-white">
+        <div className="flex gap-2">
           <button
-            onClick={() => setMode('single')}
-            className={`flex-1 md:flex-none md:px-3 py-2.5 md:py-1.5 font-medium transition
-              ${mode === 'single' ? 'bg-neutral-900 text-white' : 'hover:bg-neutral-50 text-neutral-700'}`}
-          >单人录入</button>
-          <button
-            onClick={() => { setMode('batch'); setBatchStep('input') }}
-            className={`flex-1 md:flex-none md:px-3 py-2.5 md:py-1.5 font-medium transition border-x border-neutral-200
-              ${mode === 'batch' ? 'bg-neutral-900 text-white' : 'hover:bg-neutral-50 text-neutral-700'}`}
-          >批量导入</button>
-          <button
-            onClick={() => setMode('manage')}
-            className={`flex-1 md:flex-none md:px-3 py-2.5 md:py-1.5 font-medium transition
-              ${mode === 'manage' ? 'bg-neutral-900 text-white' : 'hover:bg-neutral-50 text-neutral-700'}`}
-          >人员管理</button>
+            onClick={() => setShowBatch(true)}
+            className="h-11 md:h-9 px-4 rounded-lg md:rounded-md bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 flex items-center justify-center gap-1.5"
+          >
+            <Plus size={15} /> 批量导入
+          </button>
+          {persons.length >= 2 && (
+            <button
+              onClick={() => setBatchPickIds(persons.map((p) => p.id))}
+              className="h-11 md:h-9 px-4 rounded-lg md:rounded-md border border-neutral-200 text-sm font-medium hover:bg-neutral-50 flex items-center justify-center gap-1.5"
+            >
+              <Sparkles size={15} /> 批量选单
+            </button>
+          )}
         </div>
       </div>
 
-      {/* —— 内容区 —— */}
-      <div className="flex-1 overflow-y-auto thin-scroll rounded-xl bg-white border border-neutral-200 p-3 md:p-5">
-        {/* 单人录入 */}
-        {mode === 'single' && (
-          <div className="max-w-xl space-y-5">
-            <div className="text-sm font-medium text-neutral-700">
-              输入人员姓名，进入选单界面
-            </div>
-            <div className="flex flex-col md:flex-row gap-2">
-              <input
-                value={singleName}
-                onChange={(e) => setSingleName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handlePickStart() }}
-                placeholder="例如：张三"
-                className="flex-1 h-11 md:h-10 px-3 rounded-lg md:rounded-md border border-neutral-200 text-sm outline-none focus:border-neutral-400"
-              />
+      {/* —— 搜索框 —— */}
+      <div className="relative">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+        <input
+          value={searchP}
+          onChange={(e) => setSearchP(e.target.value)}
+          placeholder="搜索人员姓名..."
+          className="w-full h-11 md:h-10 pl-9 pr-3 rounded-lg md:rounded-md border border-neutral-200 text-sm outline-none focus:border-neutral-400 bg-white"
+        />
+      </div>
+
+      {/* —— 人员列表 —— */}
+      <div className="flex-1 overflow-y-auto thin-scroll rounded-xl bg-white border border-neutral-200">
+        {filteredPersons.length === 0 ? (
+          <div className="flex flex-col items-center justify-center text-center text-sm text-neutral-400 py-20">
+            <Users size={32} className="mb-3 text-neutral-300" />
+            <div>{persons.length === 0 ? '还没有录入任何人员' : '没有匹配的人员'}</div>
+            {persons.length === 0 && (
               <button
-                onClick={handlePickStart}
-                className="h-11 md:h-10 px-5 md:px-4 rounded-lg md:rounded-md bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 flex items-center justify-center gap-1.5"
+                onClick={() => setShowBatch(true)}
+                className="mt-4 h-10 px-4 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 flex items-center gap-1.5"
               >
-                <UserPlus size={15} /> 开始选单
+                <Plus size={14} /> 立即批量导入
               </button>
-            </div>
-            {items.length === 0 && (
-              <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                代选单库暂无图片，请先到「代选单库」上传图片。
-              </div>
-            )}
-            {persons.length > 0 && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-xs text-neutral-500">已录入（点击进入选单）</div>
-                  {persons.length >= 2 && (
-                    <button
-                      onClick={() => {
-                        const ids = persons.map((p) => p.id)
-                        setBatchPickIds(ids)
-                      }}
-                      className="text-xs text-neutral-900 font-medium hover:text-neutral-700 flex items-center gap-1 px-2.5 py-1 rounded-full bg-neutral-100 hover:bg-neutral-200 transition"
-                    >
-                      <Sparkles size={12} /> 批量选单（所有人一起）
-                    </button>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {persons.slice(0, 20).map((p) => {
-                    const c = selMap.get(p.id)?.size ?? 0
-                    return (
-                      <button
-                        key={p.id}
-                        onClick={() => setPickingPersonId(p.id)}
-                        className="inline-flex items-center gap-1 rounded-full border border-neutral-200 px-3 py-1.5 text-sm text-neutral-700 hover:border-neutral-400 active:bg-neutral-100"
-                      >
-                        {p.name}
-                        <span className="text-neutral-400">· {c} 张</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
             )}
           </div>
-        )}
-
-        {/* 批量导入 */}
-        {mode === 'batch' && (
-          <div className="max-w-3xl">
-            {batchStep === 'input' ? (
-              <>
-                <div className="text-sm font-medium text-neutral-700 mb-1">
-                  粘贴人员姓名，每行一个
-                </div>
-                <div className="text-xs text-neutral-500 mb-3">
-                  自动清理 <code className="bg-neutral-100 rounded px-1">[图片]</code>、
-                  <code className="bg-neutral-100 rounded px-1">{'<img>...</img>'}</code>、
-                  URL 等聊天记录垃圾
-                </div>
-                <textarea
-                  value={batchRaw}
-                  onChange={(e) => setBatchRaw(e.target.value)}
-                  placeholder={`马雨晴\n鑫念[图片]\n张三\n李四\n王五`}
-                  className="w-full h-56 md:h-48 p-3 rounded-lg md:rounded-md border border-neutral-200 text-sm outline-none focus:border-neutral-400 font-mono"
-                />
-                <div className="mt-3 flex flex-col md:flex-row justify-end gap-2">
+        ) : (
+          <div className="divide-y">
+            {filteredPersons.map((p) => {
+              const pickedCount = selMap.get(p.id)?.size ?? 0
+              return (
+                <div
+                  key={p.id}
+                  className="flex items-center gap-3 px-4 md:px-5 py-3 md:py-3 hover:bg-neutral-50 transition"
+                >
+                  {/* 头像 */}
                   <button
-                    onClick={() => { setBatchRaw(''); setBatchPreview([]) }}
-                    className="h-11 md:h-9 px-4 rounded-lg md:rounded-md text-sm hover:bg-neutral-100"
-                  >清空</button>
-                  <button
-                    onClick={nextBatchStep}
-                    className="h-11 md:h-9 px-5 md:px-4 rounded-lg md:rounded-md bg-neutral-900 text-white text-sm hover:bg-neutral-800 flex items-center justify-center gap-1"
-                  >下一步<ChevronRight size={15} /></button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="text-sm font-medium text-neutral-700 mb-3">
-                  清洗后将导入 <strong>{batchPreview.length}</strong> 人（可手动增删改）
-                </div>
-                <div className="rounded-lg md:rounded-md border border-neutral-200 max-h-80 overflow-y-auto thin-scroll divide-y">
-                  {batchPreview.map((n, i) => (
-                    <div key={i} className="flex items-center gap-2 px-3 py-2 text-sm">
-                      <span className="text-neutral-400 w-8 font-mono text-right flex-shrink-0">{i + 1}.</span>
-                      <input
-                        value={n}
-                        onChange={(e) => {
-                          const next = [...batchPreview]
-                          next[i] = e.target.value
-                          setBatchPreview(next)
-                        }}
-                        className="flex-1 bg-transparent outline-none"
-                      />
-                      <button
-                        onClick={() => setBatchPreview(batchPreview.filter((_, j) => j !== i))}
-                        className="p-1.5 rounded hover:bg-red-50 text-neutral-400 hover:text-red-500"
-                        aria-label="删除此行"
-                      ><X size={15} /></button>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-3 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
-                  <button onClick={() => setBatchStep('input')} className="h-11 md:h-auto text-sm text-neutral-500 hover:text-neutral-800 flex items-center justify-center md:justify-start gap-1">
-                    <ChevronLeft size={15} /> 返回修改
+                    onClick={() => setPickingPersonId(p.id)}
+                    className="flex-shrink-0 w-10 h-10 md:w-11 md:h-11 rounded-full bg-gradient-to-br from-neutral-100 to-neutral-200 flex items-center justify-center text-neutral-600 font-medium text-base md:text-lg hover:from-neutral-200 hover:to-neutral-300"
+                    title="点此选单"
+                  >
+                    {p.name.slice(-2)}
                   </button>
-                  <div className="flex gap-2">
-                    <button onClick={() => { setBatchRaw(''); setBatchPreview([]); setBatchStep('input') }}
-                      className="flex-1 md:flex-none h-11 md:h-9 px-4 rounded-lg md:rounded-md text-sm hover:bg-neutral-100">取消</button>
-                    <button onClick={confirmBatch}
-                      className="flex-1 md:flex-none h-11 md:h-9 px-5 rounded-lg md:rounded-md bg-neutral-900 text-white text-sm hover:bg-neutral-800 flex items-center justify-center gap-1">
-                      <CheckCircle size={15} /> 确认导入
-                    </button>
+                  {/* 名字 + 统计 */}
+                  <div className="flex-1 min-w-0">
+                    <button
+                      onClick={() => setPickingPersonId(p.id)}
+                      className="text-sm md:text-base text-neutral-900 font-medium truncate text-left hover:text-neutral-700"
+                      title="点此选单"
+                    >{p.name}</button>
+                    <div className="text-xs text-neutral-400 mt-0.5">
+                      {pickedCount > 0 ? `已选 ${pickedCount} 张图片` : '还没选图'}
+                    </div>
+                  </div>
+                  {/* 操作 */}
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setPickingPersonId(p.id)}
+                      className="h-9 px-3 rounded-md text-sm text-neutral-900 bg-neutral-100 hover:bg-neutral-200 flex items-center gap-1 font-medium"
+                    ><Check size={14} />选单</button>
+                    <button
+                      onClick={() => setRenameTarget({ id: p.id, name: p.name })}
+                      className="p-2 rounded-md text-neutral-500 hover:bg-neutral-100"
+                      aria-label="改名"
+                    ><Pencil size={15} /></button>
+                    <button
+                      onClick={() => setConfirmDelPerson(p.id)}
+                      className="p-2 rounded-md text-neutral-500 hover:bg-red-50 hover:text-red-500"
+                      aria-label="删除"
+                    ><Trash2 size={15} /></button>
                   </div>
                 </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* 人员管理 */}
-        {mode === 'manage' && (
-          <div>
-            <div className="flex gap-2 mb-3 max-w-full">
-              <div className="relative flex-1">
-                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-                <input
-                  value={searchP}
-                  onChange={(e) => setSearchP(e.target.value)}
-                  placeholder="搜索人员"
-                  className="w-full h-11 md:h-9 pl-9 pr-3 rounded-lg md:rounded-md border border-neutral-200 text-sm outline-none focus:border-neutral-400 bg-white"
-                />
-              </div>
-            </div>
-            {filteredPersons.length === 0 ? (
-              <div className="text-sm text-neutral-400 text-center py-10">暂无人员</div>
-            ) : (
-              <div className="divide-y -mx-3 md:-mx-5">
-                {filteredPersons.map((p) => {
-                  const pickedCount = selMap.get(p.id)?.size ?? 0
-                  return (
-                    <div key={p.id} className="flex items-center gap-2 md:gap-3 px-3 md:px-5 py-3 md:py-2.5">
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm text-neutral-900 font-medium truncate">{p.name}</div>
-                        <div className="text-xs text-neutral-400 mt-0.5">
-                          已选 {pickedCount} 张图片
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setPickingPersonId(p.id)}
-                        className="h-10 md:h-auto px-2.5 py-2 md:py-1.5 rounded-md text-sm md:text-xs text-neutral-700 hover:bg-neutral-100 flex items-center gap-1"
-                      ><Check size={14} />选单</button>
-                      <button
-                        onClick={() => setRenameTarget({ id: p.id, name: p.name })}
-                        className="h-10 md:h-auto px-2.5 py-2 md:py-1.5 rounded-md text-sm md:text-xs text-neutral-700 hover:bg-neutral-100 flex items-center gap-1"
-                      ><Pencil size={14} />改名</button>
-                      <button
-                        onClick={() => setConfirmDelPerson(p.id)}
-                        className="h-10 md:h-auto px-2.5 py-2 md:py-1.5 rounded-md text-sm md:text-xs text-red-500 hover:bg-red-50 flex items-center gap-1"
-                      ><Trash2 size={14} />删</button>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+              )
+            })}
           </div>
         )}
       </div>
@@ -425,16 +304,94 @@ export function AgentEnroll() {
       </Modal>
 
       {/* 删除人员 */}
-      <Modal open={!!confirmDelPerson} onClose={() => setConfirmDelPerson(null)} title="删除人员记录？"
+      <Modal open={!!confirmDelPerson} onClose={() => setConfirmDelPerson(null)} title="删除人员？"
         footer={
           <>
             <button onClick={() => setConfirmDelPerson(null)} className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md text-sm hover:bg-neutral-100">取消</button>
             <button onClick={confirmDeletePerson} className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md bg-red-600 text-white text-sm hover:bg-red-700">确认删除</button>
           </>
         }>
-        <p className="text-sm text-neutral-700">
-          仅删除该人员与其图片之间的选择关系，不会删除代选单库中的图片。
-        </p>
+        <p className="text-sm text-neutral-700">仅删除该人员与其图片之间的选择关系，不会删除代选单库中的图片。</p>
+      </Modal>
+
+      {/* 批量导入 Modal */}
+      <Modal
+        open={showBatch}
+        onClose={() => { setShowBatch(false); setBatchStep('input'); setBatchRaw(''); setBatchPreview([]) }}
+        title={batchStep === 'input' ? '批量导入人员' : '确认导入'}
+        width="max-w-xl"
+        footer={
+          batchStep === 'input' ? (
+            <>
+              <button
+                onClick={() => setShowBatch(false)}
+                className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md text-sm hover:bg-neutral-100"
+              >取消</button>
+              <button
+                onClick={nextBatchStep}
+                className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md bg-neutral-900 text-white text-sm hover:bg-neutral-800"
+              >下一步</button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => setBatchStep('input')}
+                className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md text-sm hover:bg-neutral-100"
+              >返回修改</button>
+              <button
+                onClick={() => { setShowBatch(false); setBatchStep('input'); setBatchRaw(''); setBatchPreview([]) }}
+                className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md text-sm hover:bg-neutral-100"
+              >取消</button>
+              <button
+                onClick={confirmBatch}
+                className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md bg-neutral-900 text-white text-sm hover:bg-neutral-800 flex items-center gap-1"
+              >确认导入 {batchPreview.length} 人</button>
+            </>
+          )
+        }
+      >
+        {batchStep === 'input' ? (
+          <>
+            <div className="text-sm text-neutral-700 mb-2">粘贴人员姓名，每行一个</div>
+            <div className="text-xs text-neutral-500 mb-3">
+              自动清理聊天记录中的 <code className="bg-neutral-100 rounded px-1">[图片]</code>、
+              <code className="bg-neutral-100 rounded px-1">{'<img>'}</code>、URL 等垃圾
+            </div>
+            <textarea
+              value={batchRaw}
+              onChange={(e) => setBatchRaw(e.target.value)}
+              placeholder={`马雨晴\n鑫念[图片]\n张三\n李四\n王五`}
+              className="w-full h-56 p-3 rounded-lg border border-neutral-200 text-sm outline-none focus:border-neutral-400 font-mono"
+            />
+          </>
+        ) : (
+          <>
+            <div className="text-sm text-neutral-700 mb-3">
+              清洗后将导入 <strong>{batchPreview.length}</strong> 人（可手动编辑）
+            </div>
+            <div className="rounded-lg border border-neutral-200 max-h-72 overflow-y-auto thin-scroll divide-y">
+              {batchPreview.map((n, i) => (
+                <div key={i} className="flex items-center gap-2 px-3 py-2 text-sm">
+                  <span className="text-neutral-400 w-8 font-mono text-right flex-shrink-0">{i + 1}.</span>
+                  <input
+                    value={n}
+                    onChange={(e) => {
+                      const next = [...batchPreview]
+                      next[i] = e.target.value
+                      setBatchPreview(next)
+                    }}
+                    className="flex-1 bg-transparent outline-none"
+                  />
+                  <button
+                    onClick={() => setBatchPreview(batchPreview.filter((_, j) => j !== i))}
+                    className="p-1.5 rounded hover:bg-red-50 text-neutral-400 hover:text-red-500"
+                    aria-label="删除此行"
+                  ><X size={15} /></button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </Modal>
 
       {/* 批量导入后问是否进入批量选单 */}
@@ -479,11 +436,12 @@ export function AgentEnroll() {
   )
 }
 
-/** 单人选单网格 */
+/* ============ Pick Grid (单人选单) ============ */
 function PickGrid({
-  items, picked, personName, onBack, onToggle, onConfirmDone, onCancelClear,
+  items, categories, picked, personName, onBack, onToggle, onConfirmDone, onCancelClear,
 }: {
   items: Item[]
+  categories: { id: string; name: string; order: number }[]
   picked: Set<string>
   personName: string
   onBack: () => void
@@ -492,8 +450,19 @@ function PickGrid({
   onCancelClear: () => void
 }) {
   const [search, setSearch] = useState('')
+  const [catId, setCatId] = useState<string | null>(null) // null = 全部
   const [showCancel, setShowCancel] = useState(false)
-  const filtered = items.filter((i) => !search.trim() || i.name.toLowerCase().includes(search.trim().toLowerCase()))
+
+  const filtered = useMemo(() => {
+    let list = items
+    if (catId) list = list.filter((i) => i.categoryId === catId)
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      list = list.filter((i) => i.name.toLowerCase().includes(q))
+    }
+    return list
+  }, [items, catId, search])
+
   const pickedCount = picked.size
 
   return (
@@ -522,11 +491,32 @@ function PickGrid({
         </div>
       </div>
 
+      {/* 分类快捷过滤 */}
+      {categories.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto thin-scroll -mx-1 px-1 pb-1">
+          <button
+            onClick={() => setCatId(null)}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm border transition ${
+              catId === null ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-200'
+            }`}
+          >全部</button>
+          {categories.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setCatId(c.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm border transition ${
+                catId === c.id ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-200'
+              }`}
+            >{c.name}</button>
+          ))}
+        </div>
+      )}
+
       {/* 网格 */}
-      {items.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed border-neutral-200 flex-1 flex flex-col items-center justify-center text-center text-sm text-neutral-400">
           <FileText size={26} className="mb-2 text-neutral-300" />
-          代选单库暂无图片
+          该分类暂无图片
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto thin-scroll rounded-xl bg-white border border-neutral-200 p-3 md:p-4 pb-24 md:pb-4">
@@ -595,20 +585,20 @@ function PickGrid({
           </>
         }>
         <p className="text-sm text-neutral-700">
-          会清掉 <strong>{personName}</strong> 已经选中的 <strong>{pickedCount}</strong> 张图片，<br/>
-          <span className="text-neutral-500">已选中的图片需要重新选。</span>
+          会清掉 <strong>{personName}</strong> 已经选中的 <strong>{pickedCount}</strong> 张图片。
         </p>
       </Modal>
     </div>
   )
 }
 
-/** 批量同时选单网格 */
+/* ============ Batch Pick Grid ============ */
 function BatchPickGrid({
-  items, persons, selMap, pickedCounts, anyPickedCount, totalPicks,
+  items, categories, persons, selMap, pickedCounts, anyPickedCount, totalPicks,
   onBack, onToggleForAll, onTogglePerson, onConfirmDone, onCancelClear,
 }: {
   items: Item[]
+  categories: { id: string; name: string; order: number }[]
   persons: { id: string; name: string }[]
   selMap: Map<string, Set<string>>
   pickedCounts: Map<string, number>
@@ -618,11 +608,21 @@ function BatchPickGrid({
   onToggleForAll: (itemId: string) => void
   onTogglePerson: (pid: string) => void
   onConfirmDone: (names: string[], total: number) => void
-  onCancelClear: (names: string[]) => void
+  onCancelClear: () => void
 }) {
   const [search, setSearch] = useState('')
+  const [catId, setCatId] = useState<string | null>(null)
   const [showCancel, setShowCancel] = useState(false)
-  const filtered = items.filter((i) => !search.trim() || i.name.toLowerCase().includes(search.trim().toLowerCase()))
+
+  const filtered = useMemo(() => {
+    let list = items
+    if (catId) list = list.filter((i) => i.categoryId === catId)
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      list = list.filter((i) => i.name.toLowerCase().includes(q))
+    }
+    return list
+  }, [items, catId, search])
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col gap-3 md:gap-5 relative">
@@ -651,7 +651,7 @@ function BatchPickGrid({
         </div>
       </div>
 
-      {/* 参与人员选择条（横向滚动） */}
+      {/* 参与人员 */}
       <div className="rounded-xl bg-white border border-neutral-200 p-3">
         <div className="text-xs text-neutral-500 mb-2 flex items-center gap-1">
           <Users size={12} /> 参与选单的人员（点击可移除）
@@ -674,11 +674,32 @@ function BatchPickGrid({
         </div>
       </div>
 
+      {/* 分类过滤 */}
+      {categories.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto thin-scroll -mx-1 px-1 pb-1">
+          <button
+            onClick={() => setCatId(null)}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm border transition ${
+              catId === null ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-200'
+            }`}
+          >全部</button>
+          {categories.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setCatId(c.id)}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm border transition ${
+                catId === c.id ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-200'
+              }`}
+            >{c.name}</button>
+          ))}
+        </div>
+      )}
+
       {/* 网格 */}
-      {items.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed border-neutral-200 flex-1 flex flex-col items-center justify-center text-center text-sm text-neutral-400">
           <FileText size={26} className="mb-2 text-neutral-300" />
-          代选单库暂无图片
+          该分类暂无图片
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto thin-scroll rounded-xl bg-white border border-neutral-200 p-3 md:p-4 pb-24 md:pb-4">
@@ -755,16 +776,13 @@ function BatchPickGrid({
           <>
             <button onClick={() => setShowCancel(false)} className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md text-sm hover:bg-neutral-100">再看看</button>
             <button
-              onClick={() => {
-                setShowCancel(false)
-                onCancelClear(persons.map((p) => p.name))
-              }}
+              onClick={() => { setShowCancel(false); onCancelClear() }}
               className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md bg-red-600 text-white text-sm hover:bg-red-700"
             >确认清空 {totalPicks} 条</button>
           </>
         }>
         <p className="text-sm text-neutral-700">
-          会清掉 <strong>{persons.length}</strong> 人共 <strong>{totalPicks}</strong> 条选择关系：
+          会清掉 <strong>{persons.length}</strong> 人共 <strong>{totalPicks}</strong> 条选择关系。
         </p>
         <div className="mt-2 flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
           {persons.map((p) => {
