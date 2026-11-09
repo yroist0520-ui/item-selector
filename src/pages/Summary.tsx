@@ -226,8 +226,8 @@ export function Summary() {
   async function handleSinglePNG(s: SummaryItem) { await withClearAfter([s.itemId], () => exportSinglePNG(s)) }
   async function handleSinglePDF(s: SummaryItem) { await withClearAfter([s.itemId], () => exportSinglePDF(s)) }
   async function handleAllPDF() {
-    const targets = filtered
-    if (targets.length === 0) { toast.info('当前时间范围内没有图片可导出'); return }
+    const targets = filtered.filter((s) => s.names.length > 0)
+    if (targets.length === 0) { toast.error('没有带名单的图片可导出'); return }
     setBusy('pdf-all')
     try {
       const pages = await exportMultiPDF(targets)
@@ -239,8 +239,8 @@ export function Summary() {
     } finally { setBusy(null); setBusyProgress(null) }
   }
   async function handleBulkPNG() {
-    const targets = filtered
-    if (targets.length === 0) { toast.info('当前时间范围内没有图片可导出'); return }
+    const targets = filtered.filter((s) => s.names.length > 0)
+    if (targets.length === 0) { toast.error('没有带名单的图片可导出'); return }
     setBusy('zip')
     setBusyProgress({ cur: 0, total: targets.length, name: targets[0].name })
     try {
@@ -393,7 +393,7 @@ export function Summary() {
           <div className="relative">
             <button
               onClick={() => setShowExportMenu((v) => !v)}
-              disabled={!!busy || filtered.length === 0}
+              disabled={!!busy || !filtered.some((s) => s.names.length > 0)}
               className="h-11 md:h-9 px-4 md:px-3 rounded-lg md:rounded-md bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 flex items-center justify-center gap-1 disabled:opacity-40"
             >
               <Download size={15} /> 批量导出
@@ -405,14 +405,14 @@ export function Summary() {
                 <div className="absolute right-0 mt-1 w-44 rounded-lg border border-neutral-200 bg-white shadow-lg z-20 overflow-hidden">
                   <button
                     onClick={() => { setShowExportMenu(false); handleAllPDF() }}
-                    disabled={!!busy || filtered.length === 0}
+                    disabled={!!busy || !filtered.some((s) => s.names.length > 0)}
                     className="w-full px-3 py-2 text-left text-sm hover:bg-neutral-50 flex items-center gap-2 disabled:opacity-40"
                   >
                     <FileText size={14} className="text-neutral-500" /> 全部 PDF（一份长文档）
                   </button>
                   <button
                     onClick={() => { setShowExportMenu(false); handleBulkPNG() }}
-                    disabled={!!busy || filtered.length === 0}
+                    disabled={!!busy || !filtered.some((s) => s.names.length > 0)}
                     className="w-full px-3 py-2 text-left text-sm hover:bg-neutral-50 flex items-center gap-2 disabled:opacity-40"
                   >
                     <Archive size={14} className="text-neutral-500" /> ZIP 压缩包（每张 PNG）
@@ -448,7 +448,7 @@ export function Summary() {
               : `在「${timeRange.label}」范围内没有选择记录`}
           </div>
         ) : (
-          <div className="grid gap-2 md:gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <div className="grid gap-2 md:gap-3 grid-cols-2 md:grid-cols-4">
             {filtered.map((s) => (
               <SummaryCard
                 key={s.itemId}
@@ -523,7 +523,7 @@ function SummaryCard({
 
   return (
     <div className="rounded-lg border border-neutral-200 overflow-hidden bg-white flex flex-col">
-      <div className="aspect-square bg-neutral-50 relative">
+      <div className="aspect-[4/3] bg-neutral-50 relative">
         {url
           ? <img src={url} alt="" className="w-full h-full object-cover" />
           : <ImageOff size={24} className="absolute inset-0 m-auto text-neutral-300" />}

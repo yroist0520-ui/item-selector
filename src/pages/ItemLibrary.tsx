@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Image as ImageIcon, Upload, Edit2, Trash2, Search, ImageOff,
-  Plus, Tag, FolderOpen, Move,
+  Plus, Tag, FolderOpen, Move, RefreshCw,
 } from 'lucide-react'
 import { db, addItem, updateItem, deleteItem, setItemCategory, addCategory, deleteCategory, renameCategory, type Item, type Category } from '@/db'
 import { toast } from '@/utils/toast'
@@ -30,6 +30,8 @@ export function ItemLibrary() {
   const [editingName, setEditingName] = useState('')
   const [confirmDelId, setConfirmDelId] = useState<string | null>(null)
   const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
+  const [replaceTargetId, setReplaceTargetId] = useState<string | null>(null)
+  const [replaceFile, setReplaceFile] = useState<File | null>(null)
 
   // 创建 / 编辑 / 删除分类
   const [showCreateCat, setShowCreateCat] = useState(false)
@@ -119,6 +121,20 @@ export function ItemLibrary() {
       : '未分类'
     setMoveTargetId(null)
     toast.success(`已移动到「${catName ?? '未分类'}」`)
+  }
+
+  async function confirmReplace() {
+    if (!replaceTargetId || !replaceFile) return
+    try {
+      const item = await db.items.get(replaceTargetId)
+      if (!item) return
+      await updateItem(replaceTargetId, { blob: replaceFile, name: item.name })
+      toast.success('图片已替换')
+      setReplaceTargetId(null)
+      setReplaceFile(null)
+    } catch (e: any) {
+      toast.error('替换失败：' + (e?.message ?? String(e)))
+    }
   }
 
   async function confirmCreateCat() {
@@ -272,6 +288,7 @@ export function ItemLibrary() {
                 onEdit={() => { setEditingId(it.id); setEditingName(it.name) }}
                 onDelete={() => setConfirmDelId(it.id)}
                 onMove={() => setMoveTargetId(it.id)}
+                onReplace={() => { setReplaceTargetId(it.id); setReplaceFile(null) }}
               />
             ))}
           </div>
@@ -329,6 +346,32 @@ export function ItemLibrary() {
               <Tag size={14} className="text-neutral-400" /> {c.name}
             </button>
           ))}
+        </div>
+      </Modal>
+
+      {/* 替换图片 */}
+      <Modal open={!!replaceTargetId} onClose={() => { setReplaceTargetId(null); setReplaceFile(null) }} title="替换图片"
+        footer={
+          <>
+            <button onClick={() => { setReplaceTargetId(null); setReplaceFile(null) }} className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md text-sm hover:bg-neutral-100">取消</button>
+            <button
+              onClick={confirmReplace}
+              disabled={!replaceFile}
+              className="px-4 py-2.5 md:px-3 md:py-1.5 rounded-md bg-neutral-900 text-white text-sm hover:bg-neutral-800 disabled:opacity-40"
+            >确认替换</button>
+          </>
+        }>
+        <div className="space-y-3">
+          <p className="text-sm text-neutral-600">选择一张新图片替换当前图片（名称与分类保持不变）。</p>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => setReplaceFile(e.target.files?.[0] ?? null)}
+            className="block w-full text-sm text-neutral-700 file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border-0 file:bg-neutral-900 file:text-white file:text-sm file:cursor-pointer"
+          />
+          {replaceFile && (
+            <div className="text-xs text-neutral-500">已选：{replaceFile.name}</div>
+          )}
         </div>
       </Modal>
 
@@ -394,12 +437,13 @@ export function ItemLibrary() {
 
 /** 卡片组件 */
 function ItemCard({
-  item, onEdit, onDelete, onMove,
+  item, onEdit, onDelete, onMove, onReplace,
 }: {
   item: Item
   onEdit: () => void
   onDelete: () => void
   onMove: () => void
+  onReplace: () => void
 }) {
   const [catName, setCatName] = useState<string | null>(null)
   useEffect(() => {
@@ -424,23 +468,29 @@ function ItemCard({
       <div className="p-1.5 md:p-2 flex items-center gap-0.5">
         <div className="flex-1 min-w-0 text-[12px] md:text-xs text-neutral-800 truncate" title={item.name}>{item.name}</div>
         <button
+          onClick={onReplace}
+          className="p-0.5 rounded hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600"
+          aria-label="替换图片"
+          title="替换图片"
+        ><RefreshCw size={11} /></button>
+        <button
           onClick={onMove}
-          className="p-1 rounded hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600"
+          className="p-0.5 rounded hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600"
           aria-label="移动到分类"
           title="移动到分类"
-        ><Move size={12} /></button>
+        ><Move size={11} /></button>
         <button
           onClick={onEdit}
-          className="p-1 rounded hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600"
+          className="p-0.5 rounded hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600"
           aria-label="编辑名称"
           title="编辑名称"
-        ><Edit2 size={12} /></button>
+        ><Edit2 size={11} /></button>
         <button
           onClick={onDelete}
-          className="p-1 rounded hover:bg-red-50 text-neutral-400 hover:text-red-500"
+          className="p-0.5 rounded hover:bg-red-50 text-neutral-400 hover:text-red-500"
           aria-label="删除"
           title="删除"
-        ><Trash2 size={12} /></button>
+        ><Trash2 size={11} /></button>
       </div>
     </div>
   )
