@@ -1,11 +1,13 @@
 import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { PackageCheck, UserPlus, FileSpreadsheet, ShieldCheck, Menu, X } from 'lucide-react'
-import { useState, useEffect } from 'react'
-import { ItemLibrary } from '@/pages/ItemLibrary'
-import { AgentEnroll } from '@/pages/AgentEnroll'
-import { Summary } from '@/pages/Summary'
-import { BackupPage } from '@/pages/BackupPage'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { ToastHost } from '@/components/ToastHost'
+
+// 每个页面独立 chunk —— 按需加载，首屏只加载默认路由的代码
+const ItemLibrary = lazy(() => import('@/pages/ItemLibrary').then((m) => ({ default: m.ItemLibrary })))
+const AgentEnroll = lazy(() => import('@/pages/AgentEnroll').then((m) => ({ default: m.AgentEnroll })))
+const Summary = lazy(() => import('@/pages/Summary').then((m) => ({ default: m.Summary })))
+const BackupPage = lazy(() => import('@/pages/BackupPage').then((m) => ({ default: m.BackupPage })))
 
 const NAV = [
   { to: '/items', label: '代选单库', icon: PackageCheck, end: false },
@@ -13,6 +15,15 @@ const NAV = [
   { to: '/summary', label: '图片订单汇总', icon: FileSpreadsheet, end: false },
   { to: '/backup', label: '数据备份', icon: ShieldCheck, end: true },
 ]
+
+function PageFallback() {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center text-neutral-400 text-sm py-20">
+      <div className="w-8 h-8 rounded-full border-2 border-neutral-200 border-t-neutral-500 animate-spin mb-3" />
+      加载中...
+    </div>
+  )
+}
 
 export function App() {
   const loc = useLocation()
@@ -129,14 +140,16 @@ export function App() {
           className="flex-1 overflow-y-auto thin-scroll"
           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 64px)' }}
         >
-          <Routes location={loc}>
-            <Route index element={<ItemLibrary />} />
-            <Route path="/items" element={<ItemLibrary />} />
-            <Route path="/agents" element={<AgentEnroll />} />
-            <Route path="/summary" element={<Summary />} />
-            <Route path="/backup" element={<BackupPage />} />
-            <Route path="*" element={<ItemLibrary />} />
-          </Routes>
+          <Suspense fallback={<PageFallback />}>
+            <Routes location={loc}>
+              <Route index element={<ItemLibrary />} />
+              <Route path="/items" element={<ItemLibrary />} />
+              <Route path="/agents" element={<AgentEnroll />} />
+              <Route path="/summary" element={<Summary />} />
+              <Route path="/backup" element={<BackupPage />} />
+              <Route path="*" element={<ItemLibrary />} />
+            </Routes>
+          </Suspense>
         </div>
 
         {/* —— 移动端底部 Tabbar —— */}

@@ -1,5 +1,10 @@
-import jsPDF from 'jspdf'
-import JSZip from 'jszip'
+// jsPDF 和 JSZip 非常大（合计 ~250KB），只在用户点击导出时才加载
+function loadjsPDF() {
+  return import('jspdf').then((m) => m.default)
+}
+function loadJSZip() {
+  return import('jszip').then((m) => m.default)
+}
 
 export interface SummaryItem {
   itemId: string
@@ -146,6 +151,7 @@ export async function exportMultiPDF(
   items: SummaryItem[],
   onPageRendered?: (pageIdx: number) => void,
 ): Promise<number> {
+  const jsPDF = await loadjsPDF()
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
   const A4_W = 595
   const margin = 12
@@ -194,6 +200,7 @@ export async function exportBulkPNGZip(
   items: SummaryItem[],
   onProgress?: (done: number, total: number, currentName: string) => void,
 ): Promise<void> {
+  const JSZip = await loadJSZip()
   const zip = new JSZip()
   const usedNames = new Map<string, number>()
   const total = items.length
