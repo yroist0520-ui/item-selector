@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Search, Copy, Download, FileText, Archive, Trash2, Undo2,
   Check, ImageOff, Loader2, ChevronDown, ChevronRight, AlertTriangle,
+  Calendar, Clock, RotateCcw,
 } from 'lucide-react'
 import { db, clearSelectionsByItemIds, restoreSelections, type Selection } from '@/db'
 import { toast } from '@/utils/toast'
@@ -10,8 +11,20 @@ import { Modal } from '@/components/Modal'
 import { exportSinglePNG, exportSinglePDF, exportMultiPDF, exportBulkPNGZip, type SummaryItem } from '@/utils/exporter'
 
 type SortMode = 'default' | 'count-desc' | 'count-asc'
+type TimePreset = 'all' | 'since-clear' | 'today' | '7d' | '30d' | 'month' | 'custom'
 
-/** 反向汇总：items × selections × persons → SummaryItem */
+const LS_LAST_CLEAR = 'item-selector:lastClearTime'
+
+function fmtDate(ts: number): string {
+  const d = new Date(ts)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function fmtDateTime(ts: number): string {
+  const d = new Date(ts)
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
 function buildSummaries(
   items: { id: string; name: string; blob: Blob }[],
   selections: { personId: string; itemId: string }[],
@@ -20,7 +33,6 @@ function buildSummaries(
   const personMap = new Map(persons.map((p) => [p.id, p.name]))
   const itemMap = new Map(items.map((i) => [i.id, i]))
   const namesMap = new Map<string, string[]>()
-  // 按 selections 顺序累加，自动去重
   for (const s of selections) {
     const name = personMap.get(s.personId)
     if (!name) continue
@@ -36,27 +48,87 @@ function buildSummaries(
   }))
 }
 
+/** 根据预设计算时间范围 [from, to] ms */
+function resolveTimeRange(
+  preset: TimePreset,
+  customFrom: string,
+  customTo: string,
+  lastClearTime: number | null,
+): { from: number | null; to: number | null; label: string } {
+  const now = Date.now()
+  const startOfDay = () => {
+    const d = new Date()
+    d.setHours(0, 0, 0, 0)
+    return d.getTime()
+  }
+  const startOfMonth = () => {
+    const d = new Date()
+    d.setDate(1); d.setHours(0, 0, 0, 0)
+    return d.getTime()
+  }
+  switch (preset) {
+    case 'all': return { from: null, to: null, label: '全部时间' }
+    case 'since-clear': {
+      if (!lastClearTime) return { from: null, to: null, label: '全部时间（尚未清除过）' }
+      return { from: lastClearTime, to: null, label: `上次清除后 (${fmtDateTime(lastClearTime)} 起)` }
+    }
+    case 'today': return { from: startOfDay(), to: null, label: '今天' }
+    case '7d': return { from: now - 7 * 86_400_000, to: null, label: '最近 7 天' }
+    case '30d': return { from: now - 30 * 86_400_000, to: null, label: '最近 30 天' }
+    case 'month': return { from: startOfMonth(), to: null, label: '本月' }
+    case 'custom': {
+      const f = customFrom ? new Date(customFrom + 'T00:00:00').getTime() : null
+      const t = customTo ? new Date(customTo + 'T23:59:59').getTime() : null
+      if (!f && !t) return { from: null, to: null, label: '全部时间' }
+      return { from: f, to: t, label: `${f ? fmtDate(f) : '最早'} ~ ${t ? fmtDate(t) : '至今'}` }
+    }
+  }
+}
+
 export function Summary() {
   const items = useLiveQuery(() => db.items.toArray()) ?? []
   const persons = useLiveQuery(() => db.persons.toArray()) ?? []
   const selections = useLiveQuery(() => db.selections.toArray()) ?? []
 
-  const summaries = useMemo(
-    () => buildSummaries(items, selections, persons),
-    [items, persons, selections],
-  )
+  // —— 时间过滤状态 ——
+  const [preset, setPreset] = useState<TimePreset>('since-clear')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+  const [lastClearTime, setLastClearTime] = useState<number | null>(() => {
+    const raw = localStorage.getItem(LS_LAST_CLEAR)
+    return raw ? Number(raw) : null
+  })
 
+  // —— 其他状态 ——
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<SortMode>('default')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState<string | null>(null)
   const [busyProgress, setBusyProgress] = useState<{ cur: number; total: number; name: string } | null>(null)
 
-  // 清空功能相关状态
   const [clearAfterExport, setClearAfterExport] = useState(false)
   const [undoSnapshot, setUndoSnapshot] = useState<Selection[] | null>(null)
   const [undoTimer, setUndoTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
   const [confirmClearItemIds, setConfirmClearItemIds] = useState<string[] | null>(null)
+
+  // —— 根据时间范围过滤 selections ——
+  const timeRange = useMemo(
+    () => resolveTimeRange(preset, customFrom, customTo, lastClearTime),
+    [preset, customFrom, customTo, lastClearTime],
+  )
+
+  const filteredSelections = useMemo(() => {
+    return selections.filter((s) => {
+      if (timeRange.from !== null && s.createdAt < timeRange.from) return false
+      if (timeRange.to !== null && s.createdAt > timeRange.to) return false
+      return true
+    })
+  }, [selections, timeRange])
+
+  const summaries = useMemo(
+    () => buildSummaries(items, filteredSelections, persons),
+    [items, persons, filteredSelections],
+  )
 
   const filtered = useMemo(() => {
     let arr = summaries
@@ -69,6 +141,10 @@ export function Summary() {
     return arr
   }, [summaries, search, sort])
 
+  // 显示在顶部的统计
+  const totalSelectionsInRange = filteredSelections.length
+  const totalUniqueItemsInRange = new Set(filteredSelections.map((s) => s.itemId)).size
+
   function toggleExpand(id: string) {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -76,6 +152,13 @@ export function Summary() {
       else next.add(id)
       return next
     })
+  }
+
+  /** 记录"本次清空时间" */
+  function markCleared() {
+    const ts = Date.now()
+    localStorage.setItem(LS_LAST_CLEAR, String(ts))
+    setLastClearTime(ts)
   }
 
   async function doClear(itemIds: string[], requireConfirm: boolean): Promise<boolean> {
@@ -90,12 +173,11 @@ export function Summary() {
       return false
     }
     const cleared = await clearSelectionsByItemIds(itemIds)
-    // 设置撤销：保留 30 秒
+    markCleared() // ← 记住这次清空时间
     setUndoSnapshot(rowsBefore)
     if (undoTimer) clearTimeout(undoTimer)
     const t = setTimeout(() => {
-      setUndoSnapshot(null)
-      setUndoTimer(null)
+      setUndoSnapshot(null); setUndoTimer(null)
     }, 30_000)
     setUndoTimer(t)
     toast.success(`已清空 ${cleared} 条选择关系 · 30 秒内可撤销`, 5000)
@@ -117,11 +199,8 @@ export function Summary() {
         () => toast.success(`已复制 ${names.length} 个名字`),
         () => fallbackCopy(text),
       )
-    } else {
-      fallbackCopy(text)
-    }
+    } else fallbackCopy(text)
   }
-
   function fallbackCopy(text: string) {
     const ta = document.createElement('textarea')
     ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'
@@ -131,7 +210,6 @@ export function Summary() {
     document.body.removeChild(ta)
   }
 
-  // —— 导出事件包装：执行导出 → 可选清空 ——
   async function withClearAfter(itemIds: string[], exporter: () => Promise<void>): Promise<void> {
     setBusy('export')
     try {
@@ -139,28 +217,19 @@ export function Summary() {
       if (clearAfterExport) {
         await doClear(itemIds, false)
       }
-    } finally {
-      setBusy(null)
-      setBusyProgress(null)
-    }
+    } finally { setBusy(null); setBusyProgress(null) }
   }
 
-  async function handleSinglePNG(s: SummaryItem) {
-    await withClearAfter([s.itemId], () => exportSinglePNG(s))
-  }
-  async function handleSinglePDF(s: SummaryItem) {
-    await withClearAfter([s.itemId], () => exportSinglePDF(s))
-  }
+  async function handleSinglePNG(s: SummaryItem) { await withClearAfter([s.itemId], () => exportSinglePNG(s)) }
+  async function handleSinglePDF(s: SummaryItem) { await withClearAfter([s.itemId], () => exportSinglePDF(s)) }
   async function handleAllPDF() {
     const targets = filtered
-    if (targets.length === 0) { toast.info('没有图片可导出'); return }
+    if (targets.length === 0) { toast.info('当前时间范围内没有图片可导出'); return }
     setBusy('pdf-all')
     try {
       const pages = await exportMultiPDF(targets)
-      toast.success(`全部 PDF 已导出（${pages} 页）`)
-      if (clearAfterExport) {
-        await doClear(targets.map((t) => t.itemId), false)
-      }
+      toast.success(`全部 PDF 已导出（${pages} 页）· ${timeRange.label}`)
+      if (clearAfterExport) await doClear(targets.map((t) => t.itemId), false)
     } catch (err: any) {
       console.error('[全部PDF导出失败]', err)
       toast.error('PDF 导出失败：' + (err?.message ?? String(err)))
@@ -168,66 +237,135 @@ export function Summary() {
   }
   async function handleBulkPNG() {
     const targets = filtered
-    if (targets.length === 0) { toast.info('没有图片可导出'); return }
+    if (targets.length === 0) { toast.info('当前时间范围内没有图片可导出'); return }
     setBusy('zip')
     setBusyProgress({ cur: 0, total: targets.length, name: targets[0].name })
     try {
-      await exportBulkPNGZip(targets, (cur, total, name) => {
-        setBusyProgress({ cur, total, name })
-      })
-      if (clearAfterExport) {
-        await doClear(targets.map((t) => t.itemId), false)
-      }
+      await exportBulkPNGZip(targets, (cur, total, name) => setBusyProgress({ cur, total, name }))
+      toast.success(`ZIP 已导出 · ${timeRange.label}`)
+      if (clearAfterExport) await doClear(targets.map((t) => t.itemId), false)
     } finally { setBusy(null); setBusyProgress(null) }
   }
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col gap-3 md:gap-5">
-      {/* —— 顶部标题 + 操作栏 —— */}
-      <div className="space-y-3 md:space-y-0 md:flex md:flex-wrap md:items-center md:gap-3">
+      {/* —— 顶部标题 —— */}
+      <div className="space-y-2 md:space-y-0 md:flex md:flex-wrap md:items-center md:gap-3">
         <div className="md:flex-1 md:min-w-0">
           <h1 className="text-lg md:text-2xl font-semibold">图片订单汇总</h1>
           <p className="text-xs md:text-sm text-neutral-500 mt-0.5 md:mt-1">
-            以图片为中心自动汇总选择名单 · 共 {summaries.length} 张图片
+            以图片为中心汇总选择名单 · 时间范围内 <strong>{totalUniqueItemsInRange}</strong> 张图片 / <strong>{totalSelectionsInRange}</strong> 条选择
           </p>
         </div>
 
-        {/* 撤销条 */}
         {undoSnapshot && (
           <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-3 py-2 flex items-center gap-2">
             <Undo2 size={15} />
             <span className="flex-1">30 秒内可撤销上次清空</span>
-            <button
-              onClick={doUndo}
-              className="ml-auto h-9 px-3 rounded-md bg-amber-600 text-white text-sm font-medium hover:bg-amber-700"
-            >撤销</button>
+            <button onClick={doUndo}
+              className="ml-auto h-9 px-3 rounded-md bg-amber-600 text-white text-sm font-medium hover:bg-amber-700">撤销</button>
           </div>
         )}
+      </div>
 
-        {/* 搜索 + 排序 + 批量导出：手机换行堆叠 */}
-        <div className="flex flex-col md:flex-row gap-2 md:gap-3 md:w-auto">
-          <div className="relative">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="按图片名称搜索"
-              className="w-full md:w-56 h-11 md:h-9 pl-9 pr-3 rounded-lg md:rounded-md border border-neutral-200 text-sm outline-none focus:border-neutral-400 bg-white"
-            />
-          </div>
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortMode)}
-            className="w-full md:w-auto h-11 md:h-9 px-3 rounded-lg md:rounded-md border border-neutral-200 text-sm bg-white outline-none"
-          >
-            <option value="default">默认顺序</option>
-            <option value="count-desc">按选择人数 · 多 → 少</option>
-            <option value="count-asc">按选择人数 · 少 → 多</option>
-          </select>
+      {/* —— 时间范围过滤器 —— */}
+      <div className="rounded-xl border border-neutral-200 bg-white p-3 md:p-4 space-y-3">
+        <div className="flex items-center gap-2 text-sm font-medium text-neutral-700">
+          <Clock size={15} className="text-neutral-400" />
+          导出时间范围
+          <span className="ml-auto text-xs font-normal text-neutral-500">
+            当前: <span className="text-neutral-900 font-medium">{timeRange.label}</span>
+          </span>
         </div>
 
-        {/* 批量导出 + 清空选项 */}
-        <div className="flex flex-col md:flex-row gap-2 md:gap-3 md:items-center">
+        {/* 快捷预设按钮 */}
+        <div className="flex gap-1.5 md:gap-2 overflow-x-auto thin-scroll -mx-1 px-1 pb-1">
+          {([
+            { key: 'since-clear', label: '上次清除后', icon: <RotateCcw size={12} />,
+              disabled: !lastClearTime,
+              hint: lastClearTime ? fmtDateTime(lastClearTime) : '尚未清除过' },
+            { key: 'today', label: '今天', icon: <Clock size={12} /> },
+            { key: '7d', label: '最近7天', icon: <Clock size={12} /> },
+            { key: '30d', label: '最近30天', icon: <Clock size={12} /> },
+            { key: 'month', label: '本月', icon: <Calendar size={12} /> },
+            { key: 'custom', label: '自定义', icon: <Calendar size={12} /> },
+            { key: 'all', label: '全部时间', icon: <Calendar size={12} /> },
+          ] as const).map((p) => {
+            const active = preset === p.key
+            const dis = 'disabled' in p && p.disabled
+            return (
+              <button
+                key={p.key}
+                disabled={dis}
+                onClick={() => setPreset(p.key as TimePreset)}
+                title={'hint' in p && p.hint ? p.hint : undefined}
+                className={`flex-shrink-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm border transition
+                  ${active
+                    ? 'bg-neutral-900 text-white border-neutral-900'
+                    : dis
+                    ? 'bg-neutral-50 text-neutral-400 border-neutral-200 cursor-not-allowed'
+                    : 'bg-white text-neutral-700 border-neutral-200 hover:border-neutral-400'}`}
+              >
+                {p.icon}
+                <span>{p.label}</span>
+              </button>
+            )
+          })}
+        </div>
+
+        {/* 自定义日期输入 */}
+        {preset === 'custom' && (
+          <div className="flex flex-col md:flex-row gap-2 md:gap-3 items-start md:items-center">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-neutral-500">从</span>
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="h-10 md:h-9 px-2 rounded-md border border-neutral-200 text-sm bg-white outline-none focus:border-neutral-400"
+              />
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-neutral-500">到</span>
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="h-10 md:h-9 px-2 rounded-md border border-neutral-200 text-sm bg-white outline-none focus:border-neutral-400"
+              />
+            </div>
+            {(customFrom || customTo) && (
+              <button
+                onClick={() => { setCustomFrom(''); setCustomTo('') }}
+                className="text-xs text-neutral-500 hover:text-neutral-800"
+              >清除日期</button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* —— 搜索 + 排序 + 批量导出 —— */}
+      <div className="flex flex-col md:flex-wrap md:flex-row gap-2 md:gap-3 md:items-center">
+        <div className="relative md:w-56">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="按图片名称搜索"
+            className="w-full h-11 md:h-9 pl-9 pr-3 rounded-lg md:rounded-md border border-neutral-200 text-sm outline-none focus:border-neutral-400 bg-white"
+          />
+        </div>
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value as SortMode)}
+          className="w-full md:w-auto h-11 md:h-9 px-3 rounded-lg md:rounded-md border border-neutral-200 text-sm bg-white outline-none"
+        >
+          <option value="default">默认顺序</option>
+          <option value="count-desc">按选择人数 · 多 → 少</option>
+          <option value="count-asc">按选择人数 · 少 → 多</option>
+        </select>
+
+        <div className="md:ml-auto flex flex-col md:flex-row gap-2 md:gap-3 md:items-center">
           <div className="rounded-lg md:rounded-md border border-neutral-200 text-sm flex items-center gap-2 px-3 py-2 md:py-1.5 bg-white">
             <label className="flex items-center gap-1.5 cursor-pointer">
               <input
@@ -258,7 +396,7 @@ export function Summary() {
 
       {/* 导出进度 */}
       {busy && (
-        <div className="mb-3 rounded-lg border border-neutral-200 bg-white p-3 flex items-center gap-3">
+        <div className="rounded-lg border border-neutral-200 bg-white p-3 flex items-center gap-3">
           <Loader2 size={16} className="animate-spin text-neutral-700" />
           <div className="text-sm text-neutral-700">
             正在生成…
@@ -275,7 +413,9 @@ export function Summary() {
       <div className="flex-1 overflow-y-auto thin-scroll rounded-xl bg-white border border-neutral-200 p-3 md:p-4">
         {filtered.length === 0 ? (
           <div className="py-16 text-center text-sm text-neutral-400">
-            {summaries.length === 0 ? '代选单库暂无图片' : '没有匹配的图片'}
+            {selections.length === 0
+              ? '还没有任何选择关系'
+              : `在「${timeRange.label}」范围内没有选择记录`}
           </div>
         ) : (
           <div className="grid gap-3 md:gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -320,6 +460,7 @@ export function Summary() {
           <div>
             将清除 <strong>{confirmClearItemIds ? selections.filter((sel) => confirmClearItemIds.includes(sel.itemId)).length : 0}</strong> 条选择关系。<br />
             不会删除图片或人员资料。<br />
+            <strong>清空后「上次清除后」计时会重置</strong>，之后只导出新的选择记录。<br />
             操作后 30 秒内可以撤销恢复。
           </div>
         </div>
@@ -363,7 +504,6 @@ function SummaryCard({
       <div className="p-3 border-t border-neutral-100">
         <div className="text-sm font-medium text-neutral-900 truncate" title={summary.name}>{summary.name}</div>
 
-        {/* 名单 */}
         <div className="mt-2 min-h-[24px] max-h-40 overflow-y-auto thin-scroll text-xs text-neutral-700 space-y-0.5">
           {summary.names.length === 0 ? (
             <div className="text-neutral-400 italic">暂无选择</div>
@@ -382,7 +522,6 @@ function SummaryCard({
           </button>
         )}
 
-        {/* 操作：手机上一行一个，触摸友好 */}
         <div className="mt-3 grid grid-cols-2 md:flex md:flex-wrap gap-2">
           <button onClick={onCopy}
             disabled={summary.names.length === 0}
@@ -409,5 +548,3 @@ function SummaryCard({
     </div>
   )
 }
-
-
