@@ -468,22 +468,22 @@ function ItemCard({
       <div className="px-2 pt-2 pb-1">
         <div className="text-[12px] md:text-xs text-neutral-800 truncate font-medium" title={item.name}>{item.name}</div>
       </div>
-      {/* 底部：操作按钮（极简图标，黑色底） */}
+      {/* 底部：操作按钮（默认灰色，按压时变黑/红） */}
       <div className="px-2 pb-2 grid grid-cols-4 gap-1">
         <button onClick={onReplace} aria-label="替换图片" title="替换图片"
-          className="h-8 md:h-7 rounded-md bg-neutral-900 text-white hover:bg-neutral-700 flex items-center justify-center">
+          className="h-8 md:h-7 rounded-md bg-neutral-200 text-neutral-700 hover:bg-neutral-300 active:bg-neutral-900 active:text-white transition-colors flex items-center justify-center">
           <RefreshCw size={13} />
         </button>
         <button onClick={onMove} aria-label="移动到分类" title="移动到分类"
-          className="h-8 md:h-7 rounded-md bg-neutral-900 text-white hover:bg-neutral-700 flex items-center justify-center">
+          className="h-8 md:h-7 rounded-md bg-neutral-200 text-neutral-700 hover:bg-neutral-300 active:bg-neutral-900 active:text-white transition-colors flex items-center justify-center">
           <Move size={13} />
         </button>
         <button onClick={onEdit} aria-label="编辑名称" title="编辑名称"
-          className="h-8 md:h-7 rounded-md bg-neutral-900 text-white hover:bg-neutral-700 flex items-center justify-center">
+          className="h-8 md:h-7 rounded-md bg-neutral-200 text-neutral-700 hover:bg-neutral-300 active:bg-neutral-900 active:text-white transition-colors flex items-center justify-center">
           <Edit2 size={13} />
         </button>
         <button onClick={onDelete} aria-label="删除" title="删除"
-          className="h-8 md:h-7 rounded-md bg-red-600 text-white hover:bg-red-700 flex items-center justify-center">
+          className="h-8 md:h-7 rounded-md bg-neutral-200 text-neutral-700 hover:bg-red-100 active:bg-red-600 active:text-white transition-colors flex items-center justify-center">
           <Trash2 size={13} />
         </button>
       </div>
